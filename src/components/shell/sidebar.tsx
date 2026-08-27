@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GitCompare, LayoutDashboard, Rows3 } from "lucide-react";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -13,6 +14,7 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { resetSeed } = useStore();
 
   return (
     <aside className="flex w-[220px] shrink-0 flex-col bg-zinc-950 text-zinc-400">
@@ -48,6 +50,13 @@ export function Sidebar() {
       </nav>
       <div className="border-t border-white/5 px-4 py-3 text-[11px] leading-relaxed text-zinc-600">
         AI never silently edits financials. Proposed items stay dashed until accepted.
+        <button
+          type="button"
+          onClick={resetSeed}
+          className="mt-2 block text-[11px] text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+        >
+          Reset seed book
+        </button>
       </div>
     </aside>
   );

@@ -289,8 +289,12 @@ export function collectDealAttention(
       label: "Financial inconsistency",
       detail:
         deal.attention_items.find((line) =>
-          /reconcil|inconsist|unexplained|does not match/i.test(line)
-        ) ?? "Reported figures do not reconcile across source files",
+          /reconcil|inconsist|unexplained|does not match|payroll|professional-services|\$180/i.test(
+            line
+          )
+        ) ??
+        deal.attention_items[0] ??
+        "Source files do not agree on a material number",
     });
   }
 
