@@ -212,7 +212,7 @@ function AdjustmentRow({
   onReject: () => void;
   onPropose: () => void;
 }) {
-  const proposed = adj.status === "proposed";
+  const proposed = adj.status === "proposed" || adj.status === "needs_review";
   return (
     <div
       className={cn(
@@ -252,7 +252,9 @@ function AdjustmentRow({
         <div className="tabular text-[13px] font-medium">
           <Money value={adj.amount} signed />
         </div>
-        <span className="w-16 text-right text-[11px] font-medium capitalize">{adj.status}</span>
+        <span className="w-20 text-right text-[11px] font-medium capitalize">
+          {adj.status.replaceAll("_", " ")}
+        </span>
         {adj.status !== "accepted" && (
           <Button size="xs" onClick={onAccept}>
             Approve

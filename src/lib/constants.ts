@@ -14,7 +14,7 @@ import type {
 export const APP_AS_OF = "2026-08-27";
 export const STALE_DAYS = 14;
 export const UPCOMING_DEADLINE_DAYS = 7;
-export const STORE_KEY = "diligence.store.v1";
+export const STORE_KEY = "diligence.store.v2";
 export const PIPELINE_VIEW_KEY = "diligence.pipeline.view";
 
 export const CURRENT_ORG_ID = "org_northline";
@@ -151,4 +151,77 @@ export const CLAIM_KIND_LABELS: Record<string, string> = {
   source_fact: "Source fact",
   approved_assumption: "Approved assumption",
   ai_inference: "AI inference",
+};
+
+export const VISUAL_CLAIM_LABELS: Record<string, string> = {
+  fact: "Fact",
+  assumption: "Assumption",
+  proposed: "Proposed",
+  inference: "Inference",
+  conflict: "Conflict",
+  scenario: "Scenario",
+  recommendation: "Recommendation",
+};
+
+export const DETECTED_TYPE_LABELS: Record<string, string> = {
+  tax_return: "Tax return",
+  pnl: "P&L",
+  balance_sheet: "Balance sheet",
+  gl: "GL",
+  trial_balance: "Trial balance",
+  payroll_register: "Payroll register",
+  employee_roster: "Employee roster",
+  production_report: "Production report",
+  customer_client_detail: "Customer/client detail",
+  ar: "AR",
+  bank_statement: "Bank statement",
+  lease: "Lease",
+  legal: "Legal",
+  purchase_agreement_loi: "Purchase agreement/LOI",
+  email: "Email",
+  meeting_note_transcript: "Meeting note/transcript",
+  other: "Other",
+};
+
+export const FACT_REVIEW_LABELS: Record<string, string> = {
+  pending: "Pending",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  edited: "Edited",
+};
+
+export const CONFLICT_STATUS_LABELS: Record<string, string> = {
+  unreviewed: "Unreviewed",
+  investigating: "Investigating",
+  follow_up_required: "Follow-up required",
+  resolved: "Resolved",
+  accepted_difference: "Accepted difference",
+  not_material: "Not material",
+};
+
+export const OVERALL_READINESS_LABELS: Record<string, string> = {
+  intake_in_progress: "Intake in progress",
+  initial_review_ready: "Initial review ready",
+  underwriting_in_progress: "Underwriting in progress",
+  ready_for_indication: "Ready for indication",
+  ready_for_loi: "Ready for LOI",
+  confirmatory_diligence: "Confirmatory diligence",
+  ready_for_close: "Ready for close",
+};
+
+export const READINESS_DIMENSION_LABELS: Record<string, string> = {
+  document_completeness: "Document completeness",
+  financial_extraction_review: "Financial extraction review",
+  financial_reconciliation: "Financial reconciliation",
+  ebitda_adjustment_review: "EBITDA adjustment review",
+  diligence_completion: "Diligence completion",
+  key_person_commercial_risk: "Key-person / commercial risk",
+  valuation_readiness: "Valuation readiness",
+};
+
+export const ADJUSTMENT_STATUS_LABELS: Record<string, string> = {
+  proposed: "Proposed",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  needs_review: "Needs review",
 };

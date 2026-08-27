@@ -2,6 +2,7 @@ import { CURRENT_ORG_ID, CURRENT_USER_ID } from "./constants";
 import { assertReconcile } from "./format";
 import { computeBridge, diligencePct, getDealView } from "./derived";
 import { haleDeal, haleSlice } from "./seed-hale";
+import { haleEvidenceTables } from "./seed-hale-evidence";
 import { portfolioDeals, portfolioSlice } from "./seed-portfolio";
 import type { Database, Organization, User } from "./types";
 
@@ -69,6 +70,7 @@ export const users: User[] = [
 function assemble(): Database {
   const hale = haleSlice();
   const rest = portfolioSlice();
+  const evidence = haleEvidenceTables();
   return {
     organizations: [organization],
     users,
@@ -84,6 +86,21 @@ function assemble(): Database {
     notes: [...hale.notes, ...rest.notes],
     activities: [...hale.activities, ...rest.activities],
     audit_events: [...hale.audit_events, ...rest.audit_events],
+    evidence_items: evidence.evidence_items,
+    document_versions: evidence.document_versions,
+    extractions: evidence.extractions,
+    extracted_facts: evidence.extracted_facts,
+    conflicts: evidence.conflicts,
+    reconciliation_checks: evidence.reconciliation_checks,
+    assumptions: evidence.assumptions,
+    underwriting_risks: evidence.underwriting_risks,
+    valuation_scenarios: evidence.valuation_scenarios,
+    valuation_factors: evidence.valuation_factors,
+    negotiation_positions: evidence.negotiation_positions,
+    recommendations: evidence.recommendations,
+    review_decisions: evidence.review_decisions,
+    missing_items: evidence.missing_items,
+    communication_interpretations: evidence.communication_interpretations,
   };
 }
 
@@ -111,6 +128,16 @@ export function validateSeed(db: Database = seedDatabase) {
   if (hale.findings.length < 5) throw new Error("Hale needs 5+ AI findings");
   if (hale.documents.length < 10) throw new Error("Hale needs 10+ documents");
   if (hale.diligence.length < 20) throw new Error("Hale needs 20+ diligence items");
+  if (hale.evidenceItems.length < 15) throw new Error("Hale needs 15+ evidence items");
+  if (hale.conflicts.length < 8) throw new Error("Hale needs 8+ conflicts");
+  if (hale.valuationScenarios.length !== 3) throw new Error("Hale needs 3 valuation scenarios");
+  if (hale.readiness.overall === "ready_for_indication" || hale.readiness.overall === "ready_for_loi") {
+    throw new Error("Hale should not be ready for a final indication");
+  }
+  const taxConflict = hale.conflicts.find((c) => c.id === "cf_hale_tax_vs_pl");
+  if (!taxConflict || taxConflict.difference !== 240_000) {
+    throw new Error("Hale tax vs P&L conflict missing or wrong");
+  }
 
   for (const view of db.deals.map((d) => getDealView(db, d.id))) {
     if (!view?.latest) continue;

@@ -1,4 +1,5 @@
 import { CURRENT_ORG_ID } from "./constants";
+import { haleMessyDocuments } from "./seed-hale-evidence";
 import { activity, adj, contact, doc, fact, finding, inference, note, req, task, buildPeriod } from "./seed-helpers";
 import type { Database, Deal } from "./types";
 
@@ -66,6 +67,7 @@ export const haleDeal: Deal = {
     "Lease expires within 18 months",
     "Seller has not provided 2025 tax return",
   ],
+  last_reviewed_at: "2026-08-24T12:00:00.000Z",
 };
 
 const fy23 = buildPeriod({
@@ -436,6 +438,7 @@ export function haleSlice(): Pick<
         classification: "partnership_agreement",
         pages: 31,
       }),
+      ...haleMessyDocuments(),
     ],
     diligence_requests: [
       req({

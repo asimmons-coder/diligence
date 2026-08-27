@@ -1,5 +1,7 @@
 import { APP_AS_OF, STALE_DAYS, UPCOMING_DEADLINE_DAYS } from "./constants";
 import { daysBetween } from "./format";
+import { computeDigest, computeReadiness, emptyReadiness } from "./derived-evidence";
+import { ensureEvidenceTables } from "./empty-evidence";
 import type {
   AdjustmentStatus,
   AttentionItem,
@@ -105,11 +107,13 @@ export function computeBridge(reported: number, adjustments: EbitdaAdjustment[])
     .filter((a) => a.status === "accepted" && a.category === "synergy")
     .reduce((sum, a) => sum + a.amount, 0);
   const proposedLift = sumAdjustments(adjustments, "proposed");
+  const needsReviewLift = sumAdjustments(adjustments, "needs_review");
   const normalizedEbitda = reported + acceptedLift;
   const proFormaEbitda = normalizedEbitda + acceptedSynergy + proposedLift;
   return {
     acceptedLift,
     proposedLift,
+    needsReviewLift,
     acceptedSynergy,
     normalizedEbitda,
     proFormaEbitda,
@@ -193,7 +197,23 @@ export function getDealView(db: Database, dealId: string): DealView | null {
     tasks.find((t) => !t.completed) ??
     null;
 
-  return {
+  const data = ensureEvidenceTables(db);
+  const evidenceItems = data.evidence_items.filter((e) => e.deal_id === dealId);
+  const extractedFacts = data.extracted_facts.filter((f) => f.deal_id === dealId);
+  const conflicts = data.conflicts.filter((c) => c.deal_id === dealId);
+  const missingItems = data.missing_items.filter((m) => m.deal_id === dealId);
+  const interpretations = data.communication_interpretations.filter((i) => i.deal_id === dealId);
+  const assumptions = data.assumptions.filter((a) => a.deal_id === dealId);
+  const risks = data.underwriting_risks.filter((r) => r.deal_id === dealId);
+  const valuationScenarios = data.valuation_scenarios.filter((s) => s.deal_id === dealId);
+  const valuationFactors = data.valuation_factors.filter((f) => f.deal_id === dealId);
+  const negotiationPositions = data.negotiation_positions.filter((n) => n.deal_id === dealId);
+  const recommendations = data.recommendations.filter((r) => r.deal_id === dealId);
+  const openConflictCount = conflicts.filter((c) =>
+    ["unreviewed", "investigating", "follow_up_required"].includes(c.status)
+  ).length;
+  const pendingFactCount = extractedFacts.filter((f) => f.review_status === "pending").length;
+  const base = {
     deal,
     owner,
     primaryContact: contacts.find((c) => c.is_primary) ?? contacts[0] ?? null,
@@ -234,6 +254,36 @@ export function getDealView(db: Database, dealId: string): DealView | null {
       nextAction,
     }),
     nextAction,
+    evidenceItems,
+    extractedFacts,
+    conflicts,
+    missingItems,
+    interpretations,
+    assumptions,
+    risks,
+    valuationScenarios,
+    valuationFactors,
+    negotiationPositions,
+    recommendations,
+    readiness: emptyReadiness(),
+    digest: [],
+    openConflictCount,
+    pendingFactCount,
+    valuationGap: null as number | null,
+  };
+  const readiness = computeReadiness(data, dealId, base);
+  const digest = computeDigest(data, dealId);
+  const baseScenario = valuationScenarios.find((s) => s.key === "base");
+  const valuationGap =
+    baseScenario && purchasePrice != null
+      ? purchasePrice - baseScenario.selected_ebitda * baseScenario.selected_multiple
+      : null;
+
+  return {
+    ...base,
+    readiness,
+    digest,
+    valuationGap,
   };
 }
 

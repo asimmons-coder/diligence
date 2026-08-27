@@ -16,14 +16,37 @@ import {
   listDealViews,
   searchDeals,
 } from "./derived";
+import { ensureEvidenceTables } from "./empty-evidence";
 import { cloneSeed } from "./seed";
+import {
+  applyAdvanceProcessing,
+  applyConflictStatus,
+  applyConvertConflict,
+  applyCreateDeal,
+  applyEvidenceCorrection,
+  applyFactReview,
+  applyHaleMessyHydrate,
+  applyIngestFilenames,
+  applyInterpretation,
+  applyMarkReviewed,
+  applySendMissing,
+  applyValuationPatch,
+  createDealRecord,
+} from "./store-actions";
 import type {
   AdjustmentStatus,
   AiFinding,
+  ConflictStatus,
   Database,
+  Deal,
+  DetectedDocumentType,
   DiligenceStatus,
   DocumentFolder,
+  EvidenceHumanReview,
+  FactReviewStatus,
   FindingStatus,
+  ValuationScenario,
+  Vertical,
 } from "./types";
 
 export interface StoreApi {
@@ -58,6 +81,41 @@ export interface StoreApi {
     folder: DocumentFolder;
     sizeBytes?: number;
   }) => string;
+  createDeal: (input: {
+    name: string;
+    vertical: Vertical;
+    ownerId: string;
+    city?: string;
+    state?: string;
+    sourceDetail?: string;
+  }) => Deal;
+  ingestFilenames: (dealId: string, filenames: string[]) => { hydrated: boolean };
+  loadHaleMessyFolder: (dealId: string) => void;
+  correctEvidence: (
+    id: string,
+    patch: {
+      detected_type?: DetectedDocumentType;
+      detected_period?: string | null;
+      detected_entity?: string | null;
+      human_review_status?: EvidenceHumanReview;
+    }
+  ) => void;
+  reviewFact: (
+    id: string,
+    status: FactReviewStatus,
+    edits?: {
+      numeric_value?: number;
+      text_value?: string;
+      extracted_value?: string;
+      assigned_user_id?: string | null;
+    }
+  ) => void;
+  setConflictStatus: (id: string, status: ConflictStatus, notes?: string) => void;
+  convertConflict: (id: string, kind: "diligence" | "adjustment" | "task") => void;
+  sendMissingToDiligence: (id: string) => void;
+  reviewInterpretation: (id: string, decision: "approved" | "dismissed") => void;
+  updateValuationScenario: (id: string, patch: Partial<ValuationScenario>) => void;
+  markDealReviewed: (dealId: string) => void;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -84,18 +142,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [assistantOpen, setAssistantOpen] = useState(false);
 
   useEffect(() => {
+    let next = cloneSeed();
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Database;
         if (parsed?.deals?.length && parsed?.organizations?.length) {
-          setDb(parsed);
+          next = ensureEvidenceTables(parsed);
         }
       }
     } catch {
-      setDb(cloneSeed());
+      next = cloneSeed();
     }
-    setReady(true);
+    queueMicrotask(() => {
+      setDb(next);
+      setReady(true);
+    });
   }, []);
 
   const commit = useCallback((updater: (prev: Database) => Database) => {
@@ -145,7 +207,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               deal_id: existing.deal_id,
               actor_user_id: CURRENT_USER_ID,
               kind: "adjustment_status",
-              title: `${status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : "Reopened"} ${existing.description}`,
+              title: `${status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : status === "needs_review" ? "Flagged for review" : "Reopened"} ${existing.description}`,
               body: `${existing.description} is now ${status}. Amount ${existing.amount}.`,
               occurred_at: at,
               metadata: { adjustment_id: id, status },
@@ -487,6 +549,93 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [commit]
   );
 
+  const createDeal = useCallback<StoreApi["createDeal"]>((input) => {
+    const deal = createDealRecord(input);
+    commit((prev) => applyCreateDeal(prev, deal));
+    return deal;
+  }, [commit]);
+
+  const ingestFilenames = useCallback<StoreApi["ingestFilenames"]>((dealId, filenames) => {
+    let hydrated = false;
+    commit((prev) => {
+      const result = applyIngestFilenames(prev, dealId, filenames);
+      hydrated = result.hydrated;
+      return result.next;
+    });
+    if (!hydrated) {
+      window.setTimeout(() => {
+        commit((prev) => applyAdvanceProcessing(prev, dealId, "processing"));
+      }, 700);
+      window.setTimeout(() => {
+        commit((prev) => applyAdvanceProcessing(prev, dealId, "analyzed"));
+      }, 1600);
+    }
+    return { hydrated };
+  }, [commit]);
+
+  const loadHaleMessyFolder = useCallback<StoreApi["loadHaleMessyFolder"]>(
+    (dealId) => {
+      commit((prev) => applyHaleMessyHydrate(prev, dealId));
+    },
+    [commit]
+  );
+
+  const correctEvidence = useCallback<StoreApi["correctEvidence"]>(
+    (id, patch) => {
+      commit((prev) => applyEvidenceCorrection(prev, id, patch));
+    },
+    [commit]
+  );
+
+  const reviewFact = useCallback<StoreApi["reviewFact"]>(
+    (id, status, edits) => {
+      commit((prev) => applyFactReview(prev, id, status, edits));
+    },
+    [commit]
+  );
+
+  const setConflictStatus = useCallback<StoreApi["setConflictStatus"]>(
+    (id, status, notes) => {
+      commit((prev) => applyConflictStatus(prev, id, status, notes));
+    },
+    [commit]
+  );
+
+  const convertConflict = useCallback<StoreApi["convertConflict"]>(
+    (id, kind) => {
+      commit((prev) => applyConvertConflict(prev, id, kind));
+    },
+    [commit]
+  );
+
+  const sendMissingToDiligence = useCallback<StoreApi["sendMissingToDiligence"]>(
+    (id) => {
+      commit((prev) => applySendMissing(prev, id));
+    },
+    [commit]
+  );
+
+  const reviewInterpretation = useCallback<StoreApi["reviewInterpretation"]>(
+    (id, decision) => {
+      commit((prev) => applyInterpretation(prev, id, decision));
+    },
+    [commit]
+  );
+
+  const updateValuationScenario = useCallback<StoreApi["updateValuationScenario"]>(
+    (id, patch) => {
+      commit((prev) => applyValuationPatch(prev, id, patch));
+    },
+    [commit]
+  );
+
+  const markDealReviewed = useCallback<StoreApi["markDealReviewed"]>(
+    (dealId) => {
+      commit((prev) => applyMarkReviewed(prev, dealId));
+    },
+    [commit]
+  );
+
   const resetSeed = useCallback(() => {
     const next = cloneSeed();
     persist(next);
@@ -512,6 +661,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateFinding,
       acceptFindingAsQuestion,
       uploadDocument,
+      createDeal,
+      ingestFilenames,
+      loadHaleMessyFolder,
+      correctEvidence,
+      reviewFact,
+      setConflictStatus,
+      convertConflict,
+      sendMissingToDiligence,
+      reviewInterpretation,
+      updateValuationScenario,
+      markDealReviewed,
     };
   }, [
     db,
@@ -526,6 +686,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateFinding,
     acceptFindingAsQuestion,
     uploadDocument,
+    createDeal,
+    ingestFilenames,
+    loadHaleMessyFolder,
+    correctEvidence,
+    reviewFact,
+    setConflictStatus,
+    convertConflict,
+    sendMissingToDiligence,
+    reviewInterpretation,
+    updateValuationScenario,
+    markDealReviewed,
   ]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
