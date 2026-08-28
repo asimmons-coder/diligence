@@ -68,6 +68,12 @@ export const haleDeal: Deal = {
     "Seller has not provided 2025 tax return",
   ],
   last_reviewed_at: "2026-08-24T12:00:00.000Z",
+  template_id: "tpl_law_firm",
+  external_system: "mymavacy",
+  external_deal_id: "mm_hale_mercer",
+  external_deal_url: "https://app.mymavacy.example/deals/hale-mercer",
+  external_imported_at: "2026-07-18T10:00:00.000Z",
+  external_updated_at: "2026-08-26T12:00:00.000Z",
 };
 
 const fy23 = buildPeriod({

@@ -71,7 +71,7 @@ export function answerAssistant(
       bullets: [
         "Which deals need my attention today?",
         "Why did Hale & Mercer's adjusted EBITDA change?",
-        "Compare the economics of our deals currently in diligence.",
+        "What is in Giovanni's queue?",
         "What are we still waiting on from Miller Law?",
       ],
       citations: [],
@@ -92,6 +92,23 @@ export function answerAssistant(
   }
   if (/compare.*diligence|economics.*diligence|deals (currently )?in diligence/.test(q)) {
     return diligenceCompareAnswer(db);
+  }
+  if (/giovanni'?s queue|analyst queue|what is in the queue|queue today/.test(q)) {
+    return {
+      title: "Analyst queue",
+      summary:
+        "Giovanni’s daily home is /queue — classification, extraction review, reconciliation, proposed adjustments, missing items, and seller questions. Alex reviews completed items without redoing them. Corrections write evaluation events.",
+      bullets: [
+        "Assigned-to-Giovanni and assigned-by-Alex filters are first-class.",
+        "Accept/edit/reject logs why the original was wrong when Giovanni changes an extraction.",
+        "Hale Normalized stays $2.495M until a human accepts another add-back.",
+      ],
+      citations: [
+        cite("fact", "Queue", "/queue"),
+        cite("assumption", "Hale normalized", "$2,495,000 accepted"),
+      ],
+      matched: true,
+    };
   }
   if (/waiting on|outstanding|still need/.test(q) && /miller/.test(q)) {
     return millerWaitingAnswer(db);

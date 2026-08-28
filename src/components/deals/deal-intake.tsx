@@ -12,9 +12,13 @@ import {
 import { formatMoneyExact, formatPct } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { DETECTED_DOCUMENT_TYPES, type ConflictStatus } from "@/lib/types";
+import { DealTemplatePanel } from "@/components/deals/deal-template";
 import { ClaimChip } from "@/components/shared/claim-chip";
+import { ReviewReasonDialog } from "@/components/shared/review-reason-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { displayEvidencePath } from "@/lib/paths";
+import { GIOVANNI_USER_ID } from "@/lib/constants";
 
 const CONFLICT_STATUSES: ConflictStatus[] = [
   "unreviewed",
@@ -30,6 +34,7 @@ export function DealIntake({ dealId }: { dealId: string }) {
     dealView,
     correctEvidence,
     reviewFact,
+    assignItem,
     setConflictStatus,
     convertConflict,
     sendMissingToDiligence,
@@ -38,6 +43,10 @@ export function DealIntake({ dealId }: { dealId: string }) {
   const view = dealView(dealId);
   const [editFact, setEditFact] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [reasonFor, setReasonFor] = useState<{
+    factId: string;
+    action: "edited" | "rejected";
+  } | null>(null);
   if (!view) return null;
 
   const received = view.evidenceItems;
@@ -47,6 +56,32 @@ export function DealIntake({ dealId }: { dealId: string }) {
 
   return (
     <div className="space-y-8 px-5 py-4">
+      <DealTemplatePanel dealId={dealId} />
+      {reasonFor && (
+        <ReviewReasonDialog
+          action={reasonFor.action}
+          onCancel={() => setReasonFor(null)}
+          onConfirm={({ why, corrected, source }) => {
+            reviewFact(
+              reasonFor.factId,
+              reasonFor.action,
+              reasonFor.action === "edited"
+                ? {
+                    extracted_value: corrected || editValue || undefined,
+                    numeric_value: Number((corrected || editValue).replace(/[^0-9.-]/g, "")) || undefined,
+                  }
+                : undefined,
+              {
+                why_original_was_wrong: why,
+                corrected_answer: corrected,
+                controlling_source: source,
+              }
+            );
+            setEditFact(null);
+            setReasonFor(null);
+          }}
+        />
+      )}
       <section>
         <h2 className="text-[13px] font-semibold">What we received</h2>
         <p className="mb-2 text-[12px] text-zinc-600">
@@ -75,7 +110,7 @@ export function DealIntake({ dealId }: { dealId: string }) {
                 const sup = received.find((e) => e.id === item.superseded_by_id);
                 return (
                   <tr key={item.id} className="border-t align-top">
-                    <td className="px-2 py-1.5 font-medium">{item.filename ?? item.title}</td>
+                    <td className="px-2 py-1.5 font-medium">{displayEvidencePath(item)}</td>
                     <td className="px-2 py-1.5">
                       <select
                         className="h-7 max-w-[140px] rounded border bg-white px-1"
@@ -230,7 +265,7 @@ export function DealIntake({ dealId }: { dealId: string }) {
                           <Button
                             size="xs"
                             variant="outline"
-                            onClick={() => reviewFact(fact.id, "rejected")}
+                            onClick={() => setReasonFor({ factId: fact.id, action: "rejected" })}
                           >
                             Reject
                           </Button>
@@ -238,14 +273,7 @@ export function DealIntake({ dealId }: { dealId: string }) {
                         {editFact === fact.id ? (
                           <Button
                             size="xs"
-                            onClick={() => {
-                              const n = Number(editValue.replace(/[^0-9.-]/g, ""));
-                              reviewFact(fact.id, "edited", {
-                                numeric_value: Number.isFinite(n) ? n : fact.numeric_value ?? undefined,
-                                extracted_value: editValue || fact.extracted_value,
-                              });
-                              setEditFact(null);
-                            }}
+                            onClick={() => setReasonFor({ factId: fact.id, action: "edited" })}
                           >
                             Save
                           </Button>
@@ -264,11 +292,7 @@ export function DealIntake({ dealId }: { dealId: string }) {
                         <Button
                           size="xs"
                           variant="ghost"
-                          onClick={() =>
-                            reviewFact(fact.id, fact.review_status, {
-                              assigned_user_id: "user_marcus",
-                            })
-                          }
+                          onClick={() => assignItem("extracted_fact", fact.id, GIOVANNI_USER_ID)}
                         >
                           Assign
                         </Button>

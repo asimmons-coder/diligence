@@ -14,13 +14,19 @@ import type {
 export const APP_AS_OF = "2026-08-27";
 export const STALE_DAYS = 14;
 export const UPCOMING_DEADLINE_DAYS = 7;
-export const STORE_KEY = "diligence.store.v2";
+export const STORE_KEY = "diligence.store.v3";
 export const PIPELINE_VIEW_KEY = "diligence.pipeline.view";
+export const CURRENT_USER_KEY = "diligence.current_user";
 
 export const CURRENT_ORG_ID = "org_northline";
-export const CURRENT_USER_ID = "user_elena";
+export const CURRENT_USER_ID = "user_giovanni";
+export const ELENA_USER_ID = "user_elena";
+export const ALEX_USER_ID = "user_alex";
+export const GIOVANNI_USER_ID = "user_giovanni";
 export const HALE_DEAL_ID = "hale-mercer";
 export const MILLER_DEAL_ID = "miller-law";
+export const LAW_FIRM_TEMPLATE_ID = "tpl_law_firm";
+export const GENERIC_TEMPLATE_ID = "tpl_generic";
 
 export const STAGE_LABELS: Record<DealStage, string> = {
   target: "Target",
@@ -224,4 +230,30 @@ export const ADJUSTMENT_STATUS_LABELS: Record<string, string> = {
   accepted: "Accepted",
   rejected: "Rejected",
   needs_review: "Needs review",
+};
+
+export const TEMPLATE_FIELD_STATUS_LABELS: Record<string, string> = {
+  missing: "Missing",
+  extracted: "Extracted",
+  reviewed: "Reviewed",
+  accepted: "Accepted",
+  conflict: "Conflict",
+};
+
+export const EVAL_ACTION_LABELS: Record<string, string> = {
+  accepted: "Accepted",
+  edited: "Edited",
+  rejected: "Rejected",
+};
+
+export const QUEUE_KIND_LABELS: Record<string, string> = {
+  classification: "Classification",
+  extraction: "Extraction review",
+  reconciliation: "Reconciliation",
+  adjustment: "Proposed adjustments",
+  missing: "Missing information",
+  seller_question: "Seller questions",
+  assigned: "Assigned",
+  since_last_login: "Since last login",
+  awaiting_supervisor: "Awaiting supervisor",
 };

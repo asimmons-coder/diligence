@@ -19,6 +19,36 @@ export function DealOverview({ dealId }: { dealId: string }) {
         <section>
           <h2 className="mb-1.5 text-[13px] font-semibold">Deal summary</h2>
           <p className="max-w-3xl text-[13px] leading-relaxed text-zinc-700">{view.deal.summary}</p>
+          {(view.deal.external_system || db.import_events.some((e) => e.deal_id === dealId)) && (
+            <div className="mt-3 rounded-md border bg-white px-3 py-2 text-[12px] text-zinc-600">
+              <div className="font-medium text-zinc-800">Source-system boundary</div>
+              <div>
+                {view.deal.external_system ?? "local"} · {view.deal.external_deal_id ?? "—"}
+                {view.deal.external_deal_url && (
+                  <>
+                    {" · "}
+                    <a href={view.deal.external_deal_url} className="underline">
+                      External record
+                    </a>
+                  </>
+                )}
+              </div>
+              <div className="mt-1 text-[11px] text-zinc-500">
+                Imported {view.deal.external_imported_at?.slice(0, 10) ?? "—"} · updated{" "}
+                {view.deal.external_updated_at?.slice(0, 10) ?? "—"}. Diligence remains
+                authoritative for underwriting. Change events are stored, not sent.
+              </div>
+              <ul className="mt-1 text-[11px]">
+                {db.import_events
+                  .filter((e) => e.deal_id === dealId)
+                  .map((e) => (
+                    <li key={e.id}>
+                      {e.source_system} · {e.event_type}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
         </section>
         <section className="rounded-md border bg-white p-3">
           <div className="mb-1 flex items-center justify-between">

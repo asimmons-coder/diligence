@@ -1,8 +1,15 @@
-import { CURRENT_ORG_ID, CURRENT_USER_ID } from "./constants";
+import {
+  ALEX_USER_ID,
+  CURRENT_ORG_ID,
+  CURRENT_USER_ID,
+  ELENA_USER_ID,
+  GIOVANNI_USER_ID,
+} from "./constants";
 import { assertReconcile } from "./format";
 import { computeBridge, diligencePct, getDealView } from "./derived";
 import { haleDeal, haleSlice } from "./seed-hale";
 import { haleEvidenceTables } from "./seed-hale-evidence";
+import { phase3Tables } from "./seed-phase3";
 import { portfolioDeals, portfolioSlice } from "./seed-portfolio";
 import type { Database, Organization, User } from "./types";
 
@@ -16,14 +23,26 @@ export const organization: Organization = {
 
 export const users: User[] = [
   {
-    id: CURRENT_USER_ID,
+    id: GIOVANNI_USER_ID,
+    organization_id: CURRENT_ORG_ID,
+    name: "Giovanni Ackerman",
+    email: "gackerman@northline.legal",
+    role: "financial_diligence",
+    title: "Financial Diligence Associate",
+    initials: "GA",
+    is_current: true,
+    last_seen_at: "2026-08-26T18:00:00.000Z",
+  },
+  {
+    id: ELENA_USER_ID,
     organization_id: CURRENT_ORG_ID,
     name: "Elena Vargas",
     email: "evargas@northline.legal",
     role: "deal_lead",
     title: "Deal Lead",
     initials: "EV",
-    is_current: true,
+    is_current: false,
+    last_seen_at: "2026-08-27T09:00:00.000Z",
   },
   {
     id: "user_marcus",
@@ -34,6 +53,7 @@ export const users: User[] = [
     title: "Financial Diligence",
     initials: "MW",
     is_current: false,
+    last_seen_at: "2026-08-25T12:00:00.000Z",
   },
   {
     id: "user_priya",
@@ -44,9 +64,10 @@ export const users: User[] = [
     title: "VP Diligence",
     initials: "PS",
     is_current: false,
+    last_seen_at: "2026-08-24T16:00:00.000Z",
   },
   {
-    id: "user_alex",
+    id: ALEX_USER_ID,
     organization_id: CURRENT_ORG_ID,
     name: "Alex Chen",
     email: "achen@northline.legal",
@@ -54,6 +75,7 @@ export const users: User[] = [
     title: "Managing Partner",
     initials: "AC",
     is_current: false,
+    last_seen_at: "2026-08-25T16:00:00.000Z",
   },
   {
     id: "user_tom",
@@ -64,6 +86,7 @@ export const users: User[] = [
     title: "Associate",
     initials: "TB",
     is_current: false,
+    last_seen_at: "2026-08-21T11:00:00.000Z",
   },
 ];
 
@@ -71,6 +94,7 @@ function assemble(): Database {
   const hale = haleSlice();
   const rest = portfolioSlice();
   const evidence = haleEvidenceTables();
+  const phase3 = phase3Tables();
   return {
     organizations: [organization],
     users,
@@ -101,6 +125,13 @@ function assemble(): Database {
     review_decisions: evidence.review_decisions,
     missing_items: evidence.missing_items,
     communication_interpretations: evidence.communication_interpretations,
+    underwriting_templates: phase3.underwriting_templates,
+    template_fields: phase3.template_fields,
+    deal_template_field_values: phase3.deal_template_field_values,
+    evaluation_events: phase3.evaluation_events,
+    change_events: phase3.change_events,
+    import_events: phase3.import_events,
+    post_close_baselines: phase3.post_close_baselines,
   };
 }
 
@@ -137,6 +168,29 @@ export function validateSeed(db: Database = seedDatabase) {
   const taxConflict = hale.conflicts.find((c) => c.id === "cf_hale_tax_vs_pl");
   if (!taxConflict || taxConflict.difference !== 240_000) {
     throw new Error("Hale tax vs P&L conflict missing or wrong");
+  }
+
+  const giovanni = db.users.find((u) => u.id === CURRENT_USER_ID);
+  if (!giovanni || giovanni.name !== "Giovanni Ackerman") {
+    throw new Error("Giovanni must be the seeded current operator");
+  }
+  const evals = db.evaluation_events.filter((e) => e.deal_id === "hale-mercer");
+  if (evals.length < 8 || evals.length > 14) {
+    throw new Error(`Hale should seed 8–12 evaluation events, got ${evals.length}`);
+  }
+  const baseline = db.post_close_baselines.find((b) => b.deal_id === "hale-mercer");
+  if (!baseline || baseline.underwritten_ebitda !== 2_495_000) {
+    throw new Error("Hale post-close baseline missing or wrong EBITDA");
+  }
+  const nested = hale.evidenceItems.filter((e) => e.folder_path && e.basename);
+  if (nested.length < 15) throw new Error("Hale evidence must preserve nested folder paths");
+  const lawValues = db.deal_template_field_values.filter((v) => v.deal_id === "hale-mercer");
+  if (lawValues.length < 16) throw new Error("Hale needs the law-firm template fields");
+  if (lawValues.filter((v) => v.status === "missing").length < 3) {
+    throw new Error("Hale template should expose missing-field gaps");
+  }
+  if (db.deals.find((d) => d.id === "hale-mercer")?.template_id !== "tpl_law_firm") {
+    throw new Error("Hale must use the law-firm underwriting template");
   }
 
   for (const view of db.deals.map((d) => getDealView(db, d.id))) {

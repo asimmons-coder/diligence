@@ -2,10 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { HALE_MESSY_FILENAMES } from "@/lib/classifier";
-import { VERTICAL_LABELS } from "@/lib/constants";
+import { HALE_MESSY_FILENAMES, HALE_MESSY_PATHS } from "@/lib/classifier";
+import { ELENA_USER_ID, VERTICAL_LABELS } from "@/lib/constants";
+import { fileBasename, ingestFromPath } from "@/lib/paths";
 import { useStore } from "@/lib/store";
-import { VERTICALS, type Vertical } from "@/lib/types";
+import { VERTICALS, type IngestFile, type Vertical } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,11 +17,13 @@ export function NewDealForm() {
   const [path, setPath] = useState<"documents" | "manual">("documents");
   const [name, setName] = useState("");
   const [vertical, setVertical] = useState<Vertical>("legal");
-  const [ownerId, setOwnerId] = useState(db.users[0]?.id ?? "");
+  const [ownerId, setOwnerId] = useState(
+    db.users.find((u) => u.id === ELENA_USER_ID)?.id ?? db.users[0]?.id ?? ""
+  );
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [asking, setAsking] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
+  const [files, setFiles] = useState<IngestFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
 
   function openDeal(id: string, tab: "intake" | "") {
@@ -28,24 +31,38 @@ export function NewDealForm() {
   }
 
   function create(fromDocs: boolean) {
-    const deal = createDeal({
+    return createDeal({
       name,
       vertical,
       ownerId,
       city,
       state,
       sourceDetail: fromDocs ? "Document intake" : "Manual create",
+      askingPrice: asking ? Number(asking.replace(/[^0-9.]/g, "")) || null : null,
     });
-    if (asking) {
-      // asking is stored after create via hydrate or later edit — keep local only if empty
-    }
-    return deal;
   }
 
-  function onDrop(list: FileList | null) {
+  async function onDropList(list: FileList | null) {
     if (!list) return;
-    const names = Array.from(list).map((f) => f.name);
-    setFiles((prev) => [...prev, ...names]);
+    const next = Array.from(list).map((f) => {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+      return ingestFromPath(rel, f.size, f.lastModified);
+    });
+    setFiles((prev) => [...prev, ...next]);
+  }
+
+  async function onDropTransfer(dt: DataTransfer) {
+    const items = Array.from(dt.items ?? []);
+    const walked: IngestFile[] = [];
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry?.();
+      if (entry) await walkEntry(entry, "", walked);
+    }
+    if (walked.length) {
+      setFiles((prev) => [...prev, ...walked]);
+      return;
+    }
+    await onDropList(dt.files);
   }
 
   function startFromDocuments() {
@@ -62,6 +79,7 @@ export function NewDealForm() {
       city: city || "Chicago",
       state: state || "IL",
       sourceDetail: "Hale messy folder demo",
+      askingPrice: 16_800_000,
     });
     loadHaleMessyFolder(deal.id);
     openDeal(deal.id, "intake");
@@ -79,8 +97,8 @@ export function NewDealForm() {
       </div>
       <h1 className="mt-1 text-xl font-semibold tracking-tight">Start from the folder</h1>
       <p className="mt-2 text-[13px] leading-relaxed text-zinc-600">
-        Upload whatever you have. Diligence will organize the files, reconstruct the available
-        financial picture, identify conflicts, and tell you what remains missing.
+        Drop an entire directory. Diligence keeps nested paths and original filenames, classifies
+        from the basename, and never auto-accepts reported or normalized EBITDA.
       </p>
 
       <div className="mt-5 flex gap-2">
@@ -157,7 +175,7 @@ export function NewDealForm() {
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(false);
-                onDrop(e.dataTransfer.files);
+                void onDropTransfer(e.dataTransfer);
               }}
               className={`rounded-md border border-dashed px-4 py-8 text-center text-[13px] ${
                 dragOver ? "border-zinc-900 bg-zinc-50" : "border-zinc-300"
@@ -165,23 +183,39 @@ export function NewDealForm() {
             >
               <div className="font-medium">Drop the messy folder here</div>
               <div className="mt-1 text-zinc-500">
-                Classification is not required before upload. Ugly filenames are expected.
+                Directory drop preserves Financials/, Tax/, Emails/, Meetings/ and the original
+                basename. Duplicates and FINAL vs FINAL UPDATED are flagged.
               </div>
-              <label className="mt-3 inline-block cursor-pointer text-[12px] underline">
-                Or browse files
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => onDrop(e.target.files)}
-                />
-              </label>
+              <div className="mt-3 flex justify-center gap-3">
+                <label className="cursor-pointer text-[12px] underline">
+                  Browse files
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void onDropList(e.target.files)}
+                  />
+                </label>
+                <label className="cursor-pointer text-[12px] underline">
+                  Browse folder
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    // @ts-expect-error non-standard directory upload
+                    webkitdirectory=""
+                    directory=""
+                    onChange={(e) => void onDropList(e.target.files)}
+                  />
+                </label>
+              </div>
             </div>
             {files.length > 0 && (
               <ul className="mt-3 max-h-40 overflow-auto text-[12px] text-zinc-600">
                 {files.map((f) => (
-                  <li key={f} className="truncate">
-                    {f}
+                  <li key={f.path} className="truncate">
+                    {f.path}{" "}
+                    <span className="text-zinc-400">({fileBasename(f.path)})</span>
                   </li>
                 ))}
               </ul>
@@ -198,16 +232,14 @@ export function NewDealForm() {
           <Button variant="outline" onClick={loadHale}>
             Load Hale messy folder
           </Button>
-          <Button
-            variant="ghost"
-            onClick={() => router.push("/deals/hale-mercer/intake")}
-          >
+          <Button variant="ghost" onClick={() => router.push("/deals/hale-mercer/intake")}>
             Open Hale flagship intake
           </Button>
         </div>
         <p className="text-[11px] text-zinc-500">
-          Demo pack includes {HALE_MESSY_FILENAMES.length} imperfect filenames. Loading it
-          produces the full intake story immediately — no live model.
+          Demo pack includes {HALE_MESSY_FILENAMES.length} files under nested paths such as{" "}
+          {HALE_MESSY_PATHS[4]}. Loading it produces the full intake story immediately — no live
+          model.
         </p>
       </div>
     </div>
@@ -221,4 +253,42 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+async function walkEntry(entry: FileSystemEntry, prefix: string, out: IngestFile[]) {
+  if (entry.isFile) {
+    const file = await new Promise<File | null>((resolve) => {
+      (entry as FileSystemFileEntry).file(resolve, () => resolve(null));
+    });
+    if (file) {
+      const path = prefix ? `${prefix}/${file.name}` : file.name;
+      out.push(ingestFromPath(path, file.size, file.lastModified));
+    }
+    return;
+  }
+  if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    const children = await readAll(reader);
+    const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+    for (const child of children) {
+      await walkEntry(child, nextPrefix, out);
+    }
+  }
+}
+
+function readAll(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve) => {
+    const all: FileSystemEntry[] = [];
+    const pump = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) {
+          resolve(all);
+          return;
+        }
+        all.push(...batch);
+        pump();
+      }, () => resolve(all));
+    };
+    pump();
+  });
 }

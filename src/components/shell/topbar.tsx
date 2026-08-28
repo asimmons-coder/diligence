@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function Topbar() {
-  const { currentOrg, currentUser, search, setAssistantOpen, assistantOpen } = useStore();
+  const { currentOrg, currentUser, db, search, setAssistantOpen, assistantOpen, switchUser } =
+    useStore();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -81,7 +82,18 @@ export function Topbar() {
             </AvatarFallback>
           </Avatar>
           <div className="hidden leading-tight lg:block">
-            <div className="text-[13px] font-medium text-zinc-900">{currentUser.name}</div>
+            <select
+              className="max-w-[160px] bg-transparent text-[13px] font-medium text-zinc-900"
+              value={currentUser.id}
+              onChange={(e) => switchUser(e.target.value)}
+              aria-label="Switch user"
+            >
+              {db.users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
             <div className="text-[11px] text-muted-foreground">
               {ROLE_LABELS[currentUser.role]}
             </div>

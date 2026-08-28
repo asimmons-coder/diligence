@@ -123,7 +123,11 @@ export type ActivityKind =
   | "evidence_ingest"
   | "interpretation_review"
   | "valuation_edit"
-  | "deal_created";
+  | "deal_created"
+  | "evaluation_logged"
+  | "assignment"
+  | "package_export"
+  | "baseline_edit";
 
 export type DealFlagCode =
   | "concentration"
@@ -195,6 +199,7 @@ export interface User {
   title: string;
   initials: string;
   is_current: boolean;
+  last_seen_at?: string | null;
 }
 
 export interface RevenueByAttorney {
@@ -246,6 +251,12 @@ export interface Deal {
   ai_assessment: string;
   attention_items: string[];
   last_reviewed_at?: string | null;
+  template_id?: string | null;
+  external_system?: string | null;
+  external_deal_id?: string | null;
+  external_deal_url?: string | null;
+  external_imported_at?: string | null;
+  external_updated_at?: string | null;
 }
 
 export interface Contact {
@@ -421,6 +432,13 @@ export interface Database {
   review_decisions: ReviewDecision[];
   missing_items: MissingItem[];
   communication_interpretations: CommunicationInterpretation[];
+  underwriting_templates: UnderwritingTemplate[];
+  template_fields: TemplateField[];
+  deal_template_field_values: DealTemplateFieldValue[];
+  evaluation_events: EvaluationEvent[];
+  change_events: ChangeEvent[];
+  import_events: ImportEvent[];
+  post_close_baselines: PostCloseBaseline[];
 }
 
 export interface OpexLine {
@@ -607,6 +625,24 @@ export type NegotiationStrength = "strong" | "weak" | "counter";
 export type NegotiationSide = "seller" | "buyer";
 export type RecommendationKind = "structure" | "price" | "process";
 export type RecommendationReview = "pending_review" | "accepted" | "rejected";
+export type TemplateFieldStatus =
+  | "missing"
+  | "extracted"
+  | "reviewed"
+  | "accepted"
+  | "conflict";
+export type EvaluationAction = "accepted" | "edited" | "rejected";
+export type QueueKind =
+  | "classification"
+  | "extraction"
+  | "reconciliation"
+  | "adjustment"
+  | "missing"
+  | "seller_question"
+  | "assigned"
+  | "since_last_login"
+  | "awaiting_supervisor";
+export type QueuePriority = "critical" | "high" | "medium" | "low";
 export type InterpretationKind =
   | "diligence_answer"
   | "adjustment_challenge"
@@ -660,6 +696,9 @@ export interface EvidenceItem {
   page_count: number | null;
   mime_type: string | null;
   size_bytes: number | null;
+  folder_path: string;
+  basename: string;
+  content_hash: string | null;
 }
 
 export interface DocumentVersion {
@@ -706,6 +745,9 @@ export interface ExtractedFact {
   extraction_method: ExtractionMethod;
   review_status: FactReviewStatus;
   assigned_user_id: string | null;
+  assigned_by_user_id?: string | null;
+  prepared_by_user_id?: string | null;
+  reviewer_user_id?: string | null;
   conflicting_fact_ids: string[];
   claim_kind: ClaimKind;
   linked_metric_key: MetricKey | null;
@@ -728,6 +770,9 @@ export interface Conflict {
   ai_interpretation: string;
   recommended_action: string;
   owner_user_id: string | null;
+  assigned_by_user_id?: string | null;
+  prepared_by_user_id?: string | null;
+  reviewer_user_id?: string | null;
   status: ConflictStatus;
   resolution_notes: string;
   linked_request_id: string | null;
@@ -830,6 +875,10 @@ export interface Recommendation {
   alternatives: string;
   confidence: number;
   review_status: RecommendationReview;
+  assigned_user_id?: string | null;
+  assigned_by_user_id?: string | null;
+  prepared_by_user_id?: string | null;
+  reviewer_user_id?: string | null;
 }
 
 export interface ReviewDecision {
@@ -857,6 +906,8 @@ export interface MissingItem {
   blocking: boolean;
   linked_request_id: string | null;
   status: MissingItemStatus;
+  assigned_user_id?: string | null;
+  assigned_by_user_id?: string | null;
 }
 
 export interface CommunicationInterpretation {
@@ -940,3 +991,133 @@ export type EvidenceTables = Pick<
   | "missing_items"
   | "communication_interpretations"
 >;
+
+export type Phase3Tables = Pick<
+  Database,
+  | "underwriting_templates"
+  | "template_fields"
+  | "deal_template_field_values"
+  | "evaluation_events"
+  | "change_events"
+  | "import_events"
+  | "post_close_baselines"
+>;
+
+export interface UnderwritingTemplate {
+  id: string;
+  organization_id: string;
+  key: string;
+  name: string;
+  vertical: Vertical | "generic";
+  description: string;
+}
+
+export interface TemplateField {
+  id: string;
+  organization_id: string;
+  template_id: string;
+  field_key: string;
+  label: string;
+  description: string;
+  sort_order: number;
+}
+
+export interface DealTemplateFieldValue {
+  id: string;
+  organization_id: string;
+  deal_id: string;
+  template_id: string;
+  field_id: string;
+  status: TemplateFieldStatus;
+  notes: string;
+  evidence_item_ids: string[];
+  extracted_summary: string | null;
+}
+
+export interface EvaluationEvent {
+  id: string;
+  organization_id: string;
+  deal_id: string;
+  entity_type: string;
+  entity_id: string;
+  document_type: string | null;
+  financial_context: string | null;
+  initial_system_output: string;
+  analyst_action: EvaluationAction;
+  corrected_answer: string | null;
+  why_original_was_wrong: string | null;
+  controlling_source: string | null;
+  time_saved_minutes: number | null;
+  final_resolution: string;
+  preparer_user_id: string | null;
+  reviewer_user_id: string | null;
+  occurred_at: string;
+}
+
+export interface ChangeEvent {
+  id: string;
+  organization_id: string;
+  deal_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ImportEvent {
+  id: string;
+  organization_id: string;
+  deal_id: string;
+  source_system: string;
+  event_type: string;
+  external_id: string | null;
+  payload: Record<string, unknown>;
+  occurred_at: string;
+}
+
+export interface PostCloseBaseline {
+  id: string;
+  organization_id: string;
+  deal_id: string;
+  underwritten_revenue: number | null;
+  underwritten_ebitda: number | null;
+  accepted_adjustments_total: number | null;
+  expected_synergies: number | null;
+  retention_assumptions: string;
+  nwc_assumption: number | null;
+  purchase_price: number | null;
+  structure: string;
+  expected_first_year_performance: string;
+  set_by_user_id: string | null;
+  set_at: string | null;
+  notes: string;
+}
+
+export interface IngestFile {
+  path: string;
+  basename: string;
+  sizeBytes?: number | null;
+  lastModified?: number | null;
+}
+
+export interface QueueItem {
+  id: string;
+  kind: QueueKind;
+  dealId: string;
+  dealName: string;
+  title: string;
+  whyItMatters: string;
+  priority: QueuePriority;
+  href: string;
+  evidenceHref?: string;
+  assignedUserId: string | null;
+  assignedByUserId: string | null;
+  preparedByUserId: string | null;
+  reviewerUserId: string | null;
+  statusLabel: string;
+  entityType: string;
+  entityId: string;
+  occurredAt: string;
+  actions: Array<
+    "open" | "assign" | "approve" | "edit" | "reject" | "send_to_diligence"
+  >;
+}

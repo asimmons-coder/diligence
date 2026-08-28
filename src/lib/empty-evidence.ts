@@ -1,4 +1,4 @@
-import type { EvidenceTables } from "./types";
+import type { EvidenceTables, Phase3Tables } from "./types";
 
 export function emptyEvidenceTables(): EvidenceTables {
   return {
@@ -20,6 +20,18 @@ export function emptyEvidenceTables(): EvidenceTables {
   };
 }
 
+export function emptyPhase3Tables(): Phase3Tables {
+  return {
+    underwriting_templates: [],
+    template_fields: [],
+    deal_template_field_values: [],
+    evaluation_events: [],
+    change_events: [],
+    import_events: [],
+    post_close_baselines: [],
+  };
+}
+
 export function ensureEvidenceTables<T extends EvidenceTables>(db: T): T {
   const empty = emptyEvidenceTables();
   const next = { ...db };
@@ -29,4 +41,19 @@ export function ensureEvidenceTables<T extends EvidenceTables>(db: T): T {
     }
   });
   return next;
+}
+
+export function ensurePhase3Tables<T extends Phase3Tables>(db: T): T {
+  const empty = emptyPhase3Tables();
+  const next = { ...db };
+  (Object.keys(empty) as (keyof Phase3Tables)[]).forEach((key) => {
+    if (!Array.isArray(next[key])) {
+      (next as Phase3Tables)[key] = [] as never;
+    }
+  });
+  return next;
+}
+
+export function ensureDatabase<T extends EvidenceTables & Phase3Tables>(db: T): T {
+  return ensurePhase3Tables(ensureEvidenceTables(db));
 }

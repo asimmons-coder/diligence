@@ -1,4 +1,5 @@
-import { CURRENT_ORG_ID } from "./constants";
+import { ALEX_USER_ID, CURRENT_ORG_ID, GIOVANNI_USER_ID } from "./constants";
+import { fileBasename, haleFolderForBasename, stubContentHash } from "./paths";
 import { doc } from "./seed-helpers";
 import type {
   Assumption,
@@ -27,8 +28,19 @@ const PRIYA = "user_priya";
 const TOM = "user_tom";
 const ENTITY = "Hale & Mercer LLP";
 
-function ev(partial: Omit<EvidenceItem, "organization_id">): EvidenceItem {
-  return { organization_id: ORG, ...partial };
+function ev(
+  partial: Omit<EvidenceItem, "organization_id" | "folder_path" | "basename" | "content_hash"> &
+    Partial<Pick<EvidenceItem, "folder_path" | "basename" | "content_hash">>
+): EvidenceItem {
+  const filename = partial.filename ?? partial.title;
+  const basename = partial.basename ?? fileBasename(filename);
+  return {
+    organization_id: ORG,
+    ...partial,
+    folder_path: partial.folder_path ?? haleFolderForBasename(basename),
+    basename,
+    content_hash: partial.content_hash ?? stubContentHash({ basename, path: `${haleFolderForBasename(basename)}/${basename}` }),
+  };
 }
 
 function fact(partial: Omit<ExtractedFact, "organization_id">): ExtractedFact {
@@ -2454,21 +2466,63 @@ function interpretations(): CommunicationInterpretation[] {
 }
 
 export function haleEvidenceTables(): EvidenceTables {
+  const extracted = facts().map((f) => {
+    if (f.review_status === "pending") {
+      return {
+        ...f,
+        assigned_user_id: GIOVANNI_USER_ID,
+        assigned_by_user_id: ALEX_USER_ID,
+      };
+    }
+    if (f.review_status === "accepted" || f.review_status === "rejected" || f.review_status === "edited") {
+      return {
+        ...f,
+        prepared_by_user_id: GIOVANNI_USER_ID,
+        reviewer_user_id:
+          f.id === "fact_hale_payroll_partners" || f.id === "fact_hale_qb_h1"
+            ? null
+            : ALEX_USER_ID,
+      };
+    }
+    return f;
+  });
+  const conflictRows = conflicts().map((c) => {
+    const open = c.status === "unreviewed" || c.status === "investigating" || c.status === "follow_up_required";
+    return {
+      ...c,
+      owner_user_id: open ? GIOVANNI_USER_ID : c.owner_user_id,
+      assigned_by_user_id: ALEX_USER_ID,
+      prepared_by_user_id: GIOVANNI_USER_ID,
+      reviewer_user_id: c.status === "accepted_difference" || c.status === "resolved" ? ALEX_USER_ID : null,
+    };
+  });
+  const missingRows = missing().map((m) => ({
+    ...m,
+    assigned_user_id: GIOVANNI_USER_ID,
+    assigned_by_user_id: ALEX_USER_ID,
+  }));
+  const recRows = recs().map((r) => ({
+    ...r,
+    assigned_user_id: GIOVANNI_USER_ID,
+    assigned_by_user_id: ALEX_USER_ID,
+    prepared_by_user_id: GIOVANNI_USER_ID,
+    reviewer_user_id: null,
+  }));
   return {
     evidence_items: items(),
     document_versions: versions(),
     extractions: extractions(),
-    extracted_facts: facts(),
-    conflicts: conflicts(),
+    extracted_facts: extracted,
+    conflicts: conflictRows,
     reconciliation_checks: checks(),
     assumptions: assumptions(),
     underwriting_risks: risks(),
     valuation_scenarios: scenarios(),
     valuation_factors: factors(),
     negotiation_positions: negotiation(),
-    recommendations: recs(),
+    recommendations: recRows,
     review_decisions: [],
-    missing_items: missing(),
+    missing_items: missingRows,
     communication_interpretations: interpretations(),
   };
 }

@@ -1,8 +1,16 @@
-import { APP_AS_OF, CURRENT_ORG_ID, CURRENT_USER_ID } from "./constants";
 import { classifyFilename, haleMessyMatchCount, isHaleMessyFilename } from "./classifier";
-import { ensureEvidenceTables } from "./empty-evidence";
-import { cloneHaleEvidenceOntoDeal, haleMessyDocuments } from "./seed-hale-evidence";
+import {
+  APP_AS_OF,
+  CURRENT_ORG_ID,
+  GENERIC_TEMPLATE_ID,
+  LAW_FIRM_TEMPLATE_ID,
+} from "./constants";
+import { ensureDatabase } from "./empty-evidence";
+import { detectDuplicatesAndRevisions, fileBasename, folderPathOf, stubContentHash } from "./paths";
+import { actorId, appendPhase3Events, makeChangeEvent, makeEvaluation } from "./phase3-write";
 import { haleSlice } from "./seed-hale";
+import { cloneHaleEvidenceOntoDeal, haleMessyDocuments } from "./seed-hale-evidence";
+import { cloneHalePhase3OntoDeal } from "./seed-phase3";
 import type {
   AdjustmentStatus,
   ConflictStatus,
@@ -12,10 +20,22 @@ import type {
   DiligenceStatus,
   EvidenceHumanReview,
   EvidenceTables,
+  EvaluationAction,
   FactReviewStatus,
+  IngestFile,
+  Phase3Tables,
+  PostCloseBaseline,
+  RecommendationReview,
   ValuationScenario,
   Vertical,
 } from "./types";
+
+export type EvaluationInput = {
+  why_original_was_wrong?: string | null;
+  controlling_source?: string | null;
+  time_saved_minutes?: number | null;
+  corrected_answer?: string | null;
+};
 
 export function nowIso() {
   return `${APP_AS_OF}T${new Date().toISOString().slice(11)}`;
@@ -25,8 +45,8 @@ export function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function mergeEvidence(prev: Database, add: EvidenceTables): Database {
-  const base = ensureEvidenceTables(prev);
+function mergeEvidence(prev: Database, add: EvidenceTables, phase3?: Phase3Tables): Database {
+  const base = ensureDatabase(prev);
   return {
     ...base,
     evidence_items: [...add.evidence_items, ...base.evidence_items],
@@ -47,6 +67,23 @@ function mergeEvidence(prev: Database, add: EvidenceTables): Database {
       ...add.communication_interpretations,
       ...base.communication_interpretations,
     ],
+    deal_template_field_values: phase3
+      ? [...phase3.deal_template_field_values, ...base.deal_template_field_values]
+      : base.deal_template_field_values,
+    evaluation_events: phase3
+      ? [...phase3.evaluation_events, ...base.evaluation_events]
+      : base.evaluation_events,
+    change_events: phase3 ? [...phase3.change_events, ...base.change_events] : base.change_events,
+    import_events: phase3 ? [...phase3.import_events, ...base.import_events] : base.import_events,
+    post_close_baselines: phase3
+      ? [...phase3.post_close_baselines, ...base.post_close_baselines]
+      : base.post_close_baselines,
+    underwriting_templates: base.underwriting_templates.length
+      ? base.underwriting_templates
+      : (phase3?.underwriting_templates ?? base.underwriting_templates),
+    template_fields: base.template_fields.length
+      ? base.template_fields
+      : (phase3?.template_fields ?? base.template_fields),
   };
 }
 
@@ -72,6 +109,7 @@ export function createDealRecord(input: {
   city?: string;
   state?: string;
   sourceDetail?: string;
+  askingPrice?: number | null;
 }): Deal {
   const at = nowIso();
   return {
@@ -85,8 +123,8 @@ export function createDealRecord(input: {
     source_detail: input.sourceDetail ?? "Document intake",
     stage: "initial_data",
     stage_entered_at: APP_AS_OF,
-    asking_price: null,
-    expected_purchase_price: null,
+    asking_price: input.askingPrice ?? null,
+    expected_purchase_price: input.askingPrice ?? null,
     probability: 0.2,
     vertical: input.vertical,
     vertical_metrics: {},
@@ -98,12 +136,18 @@ export function createDealRecord(input: {
     ai_assessment:
       "No accepted reconstruction yet. Upload the folder and review extractions — nothing is accepted silently.",
     attention_items: ["Intake in progress"],
+    template_id: input.vertical === "legal" ? LAW_FIRM_TEMPLATE_ID : GENERIC_TEMPLATE_ID,
+    external_system: null,
+    external_deal_id: null,
+    external_deal_url: null,
+    external_imported_at: null,
+    external_updated_at: null,
   };
 }
 
 export function applyCreateDeal(prev: Database, deal: Deal): Database {
   const at = deal.created_at;
-  const base = ensureEvidenceTables(prev);
+  const base = ensureDatabase(prev);
   return {
     ...base,
     deals: [deal, ...base.deals],
@@ -112,7 +156,7 @@ export function applyCreateDeal(prev: Database, deal: Deal): Database {
         id: newId("act"),
         organization_id: deal.organization_id,
         deal_id: deal.id,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         kind: "deal_created",
         title: `Created ${deal.name}`,
         body: "Deal opened. Accepted financials are empty until a human accepts facts or adjustments.",
@@ -126,7 +170,7 @@ export function applyCreateDeal(prev: Database, deal: Deal): Database {
         id: newId("aud"),
         organization_id: deal.organization_id,
         deal_id: deal.id,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         entity_type: "deal",
         entity_id: deal.id,
         action: "create",
@@ -247,6 +291,10 @@ export function applyHaleMessyHydrate(prev: Database, dealId: string): Database 
               expected_purchase_price: d.expected_purchase_price ?? 16_800_000,
               vertical: "legal",
               flags: ["concentration", "lease_expiry", "missing_tax_return", "financial_inconsistency"],
+              template_id: LAW_FIRM_TEMPLATE_ID,
+              external_system: d.external_system ?? "mymavacy",
+              external_deal_id: d.external_deal_id ?? "mm_hale_mercer",
+              external_deal_url: d.external_deal_url ?? "https://app.mymavacy.example/deals/hale-mercer",
               last_activity_at: at,
               last_reviewed_at: d.last_reviewed_at ?? "2026-08-24T12:00:00.000Z",
               summary:
@@ -262,7 +310,8 @@ export function applyHaleMessyHydrate(prev: Database, dealId: string): Database 
           : d
       ),
     },
-    remappedEvidence
+    remappedEvidence,
+    cloneHalePhase3OntoDeal(dealId, deal.organization_id)
   );
 
   return {
@@ -272,7 +321,7 @@ export function applyHaleMessyHydrate(prev: Database, dealId: string): Database 
         id: newId("act"),
         organization_id: deal.organization_id,
         deal_id: dealId,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         kind: "evidence_ingest",
         title: "Loaded Hale messy folder",
         body: "Classified 20+ items, marked superseded files, extracted facts, and opened conflicts. Accepted financials were copied as the reviewed position — new interpretations still need approval.",
@@ -287,22 +336,29 @@ export function applyHaleMessyHydrate(prev: Database, dealId: string): Database 
 export function applyIngestFilenames(
   prev: Database,
   dealId: string,
-  filenames: string[]
+  files: Array<string | IngestFile>
 ): { next: Database; hydrated: boolean } {
   const deal = prev.deals.find((d) => d.id === dealId);
   if (!deal) return { next: prev, hydrated: false };
-  if (haleMessyMatchCount(filenames) >= 8 || filenames.some((f) => isHaleMessyFilename(f))) {
-    if (haleMessyMatchCount(filenames) >= 6) {
+  const ingested: IngestFile[] = files.map((f) =>
+    typeof f === "string"
+      ? { path: f, basename: fileBasename(f), sizeBytes: null, lastModified: null }
+      : f
+  );
+  const names = ingested.map((f) => f.basename);
+  if (haleMessyMatchCount(names) >= 8 || names.some((f) => isHaleMessyFilename(f))) {
+    if (haleMessyMatchCount(names) >= 6) {
       return { next: applyHaleMessyHydrate(prev, dealId), hydrated: true };
     }
   }
 
   const at = nowIso();
-  let next = ensureEvidenceTables(prev);
-  for (const filename of filenames) {
-    const classified = classifyFilename(filename, deal.name);
+  let next = ensureDatabase(prev);
+  for (const file of ingested) {
+    const classified = classifyFilename(file.basename, deal.name);
     const docId = newId("doc");
     const evId = newId("ev");
+    const folder = folderPathOf(file.path);
     next = {
       ...next,
       documents: [
@@ -310,18 +366,18 @@ export function applyIngestFilenames(
           id: docId,
           organization_id: deal.organization_id,
           deal_id: dealId,
-          filename,
+          filename: file.basename,
           folder: classified.folder,
           uploaded_at: at,
-          uploaded_by: CURRENT_USER_ID,
+          uploaded_by: actorId(),
           processing_status: "uploading",
           classification: classified.type,
-          extracted_payload: { staged: true, filename },
+          extracted_payload: { staged: true, filename: file.basename, path: file.path },
           confidence: classified.confidence,
           linked_request_ids: [],
           page_count: null,
           mime_type: null,
-          size_bytes: null,
+          size_bytes: file.sizeBytes ?? null,
         },
         ...next.documents,
       ],
@@ -332,8 +388,8 @@ export function applyIngestFilenames(
           deal_id: dealId,
           kind: classified.type === "email" ? "email" : classified.type === "meeting_note_transcript" ? "meeting_note" : "document",
           document_id: docId,
-          filename,
-          title: filename,
+          filename: file.basename,
+          title: file.basename,
           detected_type: classified.type,
           detected_period: classified.period,
           detected_entity: classified.entity,
@@ -359,22 +415,47 @@ export function applyIngestFilenames(
           snippet: null,
           page_count: null,
           mime_type: null,
-          size_bytes: null,
+          size_bytes: file.sizeBytes ?? null,
+          folder_path: folder,
+          basename: file.basename,
+          content_hash: stubContentHash({
+            path: file.path,
+            basename: file.basename,
+            sizeBytes: file.sizeBytes,
+            lastModified: file.lastModified,
+          }),
         },
         ...next.evidence_items,
       ],
     };
   }
+  next = {
+    ...next,
+    evidence_items: detectDuplicatesAndRevisions(next.evidence_items),
+    import_events: [
+      {
+        id: newId("imp"),
+        organization_id: deal.organization_id,
+        deal_id: dealId,
+        source_system: "upload",
+        event_type: "documents.folder_imported",
+        external_id: null,
+        payload: { files: ingested.length, paths: ingested.map((f) => f.path) },
+        occurred_at: at,
+      },
+      ...next.import_events,
+    ],
+  };
   next = touchDeal(next, dealId, at, {
     id: newId("act"),
     organization_id: deal.organization_id,
     deal_id: dealId,
-    actor_user_id: CURRENT_USER_ID,
+    actor_user_id: actorId(),
     kind: "evidence_ingest",
-    title: `Uploaded ${filenames.length} file${filenames.length === 1 ? "" : "s"}`,
-    body: "Classification is deterministic from filename. No accepted financials were changed.",
+    title: `Uploaded ${ingested.length} file${ingested.length === 1 ? "" : "s"}`,
+    body: "Folder structure and original filenames preserved. Classification is deterministic. No accepted financials were changed.",
     occurred_at: at,
-    metadata: { filenames },
+    metadata: { paths: ingested.map((f) => f.path) },
   });
   return { next, hydrated: false };
 }
@@ -427,7 +508,7 @@ export function applyEvidenceCorrection(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "evidence_ingest",
       title: `Corrected classification: ${existing.filename ?? existing.title}`,
       body: "Human correction. Extraction review is unchanged.",
@@ -438,7 +519,7 @@ export function applyEvidenceCorrection(
       id: newId("aud"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       entity_type: "evidence_item",
       entity_id: id,
       action: "classification_correct",
@@ -456,14 +537,55 @@ export function applyFactReview(
   prev: Database,
   id: string,
   status: FactReviewStatus,
-  edits?: { numeric_value?: number; text_value?: string; extracted_value?: string; assigned_user_id?: string | null }
+  edits?: {
+    numeric_value?: number;
+    text_value?: string;
+    extracted_value?: string;
+    assigned_user_id?: string | null;
+    assigned_by_user_id?: string | null;
+  },
+  evaluation?: EvaluationInput
 ): Database {
   const existing = prev.extracted_facts.find((f) => f.id === id);
   if (!existing) return prev;
   const at = nowIso();
+  const actor = actorId();
+  const wroteReview = status !== existing.review_status;
+  const evalEvent =
+    wroteReview && (status === "accepted" || status === "edited" || status === "rejected")
+      ? makeEvaluation({
+          organization_id: existing.organization_id,
+          deal_id: existing.deal_id,
+          entity_type: "extracted_fact",
+          entity_id: id,
+          document_type: prev.evidence_items.find((e) => e.id === existing.evidence_item_id)?.detected_type,
+          financial_context: existing.label,
+          initial_system_output: existing.extracted_value,
+          analyst_action: status as EvaluationAction,
+          corrected_answer: evaluation?.corrected_answer ?? edits?.extracted_value ?? null,
+          why_original_was_wrong: evaluation?.why_original_was_wrong ?? null,
+          controlling_source: evaluation?.controlling_source ?? null,
+          time_saved_minutes: evaluation?.time_saved_minutes ?? null,
+          final_resolution:
+            status === "accepted"
+              ? "Accepted. Accepted financial statements were not silently rewritten."
+              : status === "rejected"
+                ? "Rejected. Source remains visible; reported/normalized unchanged."
+                : "Edited. Corrected value stored; accepted financials not auto-updated.",
+          preparer_user_id: actor,
+        })
+      : null;
+  const change = wroteReview
+    ? makeChangeEvent(existing.organization_id, existing.deal_id, `fact.${status}`, {
+        entity_id: id,
+        from: existing.review_status,
+        to: status,
+      })
+    : null;
   return touchDeal(
     {
       ...prev,
+      ...appendPhase3Events(prev, evalEvent, change),
       extracted_facts: prev.extracted_facts.map((f) =>
         f.id === id
           ? {
@@ -473,6 +595,8 @@ export function applyFactReview(
               text_value: edits?.text_value ?? f.text_value,
               extracted_value: edits?.extracted_value ?? f.extracted_value,
               assigned_user_id: edits?.assigned_user_id ?? f.assigned_user_id,
+              assigned_by_user_id: edits?.assigned_by_user_id ?? f.assigned_by_user_id,
+              prepared_by_user_id: wroteReview ? actor : f.prepared_by_user_id,
               claim_kind:
                 status === "accepted"
                   ? "source_fact"
@@ -491,7 +615,7 @@ export function applyFactReview(
           entity_id: id,
           decision: status,
           rationale: "Human review of extracted fact. Accepted reconstructed financials were not auto-updated.",
-          actor_user_id: CURRENT_USER_ID,
+          actor_user_id: actor,
           occurred_at: at,
           accepted_financials_changed: false,
         },
@@ -504,7 +628,7 @@ export function applyFactReview(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "fact_review",
       title: `${status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : "Edited"} extraction: ${existing.label}`,
       body: "Accepted financial statements were not silently rewritten. Promote a fact to a correction or adjustment if the reconstructed history should change.",
@@ -515,7 +639,7 @@ export function applyFactReview(
       id: newId("aud"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       entity_type: "extracted_fact",
       entity_id: id,
       action: "review",
@@ -530,16 +654,48 @@ export function applyConflictStatus(
   prev: Database,
   id: string,
   status: ConflictStatus,
-  notes?: string
+  notes?: string,
+  evaluation?: EvaluationInput
 ): Database {
   const existing = prev.conflicts.find((c) => c.id === id);
   if (!existing) return prev;
   const at = nowIso();
+  const action: EvaluationAction =
+    status === "resolved" || status === "accepted_difference" || status === "not_material"
+      ? "accepted"
+      : "edited";
+  const evalEvent = makeEvaluation({
+    organization_id: existing.organization_id,
+    deal_id: existing.deal_id,
+    entity_type: "conflict",
+    entity_id: id,
+    financial_context: existing.description,
+    initial_system_output: existing.ai_interpretation,
+    analyst_action: action,
+    corrected_answer: evaluation?.corrected_answer ?? notes ?? null,
+    why_original_was_wrong: evaluation?.why_original_was_wrong ?? null,
+    controlling_source: evaluation?.controlling_source ?? existing.source_b_label,
+    final_resolution: notes || `Conflict status → ${status}`,
+    preparer_user_id: actorId(),
+  });
+  const change = makeChangeEvent(existing.organization_id, existing.deal_id, "conflict.status_changed", {
+    entity_id: id,
+    from: existing.status,
+    to: status,
+  });
   return touchDeal(
     {
       ...prev,
+      ...appendPhase3Events(prev, evalEvent, change),
       conflicts: prev.conflicts.map((c) =>
-        c.id === id ? { ...c, status, resolution_notes: notes ?? c.resolution_notes } : c
+        c.id === id
+          ? {
+              ...c,
+              status,
+              resolution_notes: notes ?? c.resolution_notes,
+              prepared_by_user_id: actorId(),
+            }
+          : c
       ),
     },
     existing.deal_id,
@@ -548,7 +704,7 @@ export function applyConflictStatus(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "conflict_status",
       title: `Conflict → ${status.replaceAll("_", " ")}`,
       body: existing.description,
@@ -582,7 +738,7 @@ export function applyConvertConflict(
             category: "financial",
             question: existing.recommended_action || existing.description,
             status: "requested",
-            owner_user_id: existing.owner_user_id ?? CURRENT_USER_ID,
+            owner_user_id: existing.owner_user_id ?? actorId(),
             counterparty_owner: "Seller",
             due_date: null,
             supporting_document_ids: [],
@@ -599,7 +755,7 @@ export function applyConvertConflict(
         id: newId("act"),
         organization_id: existing.organization_id,
         deal_id: existing.deal_id,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         kind: "diligence_status",
         title: "Opened seller request from conflict",
         body: existing.description,
@@ -622,7 +778,7 @@ export function applyConvertConflict(
             organization_id: existing.organization_id,
             deal_id: existing.deal_id,
             title: existing.recommended_action || existing.description,
-            owner_user_id: existing.owner_user_id ?? CURRENT_USER_ID,
+            owner_user_id: existing.owner_user_id ?? actorId(),
             due_date: null,
             completed: false,
             completed_at: null,
@@ -637,7 +793,7 @@ export function applyConvertConflict(
         id: newId("act"),
         organization_id: existing.organization_id,
         deal_id: existing.deal_id,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         kind: "task_created",
         title: "Opened task from conflict",
         body: existing.description,
@@ -689,7 +845,7 @@ export function applyConvertConflict(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "adjustment_status",
       title: "Proposed adjustment from conflict",
       body: "Stays proposed. Normalized is unchanged.",
@@ -726,7 +882,7 @@ export function applySendMissing(prev: Database, id: string): Database {
           category: "financial",
           question: existing.suggested_seller_request,
           status: "requested",
-          owner_user_id: CURRENT_USER_ID,
+          owner_user_id: actorId(),
           counterparty_owner: "Seller",
           due_date: null,
           supporting_document_ids: [],
@@ -743,7 +899,7 @@ export function applySendMissing(prev: Database, id: string): Database {
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "diligence_status",
       title: "Sent missing item to diligence list",
       body: existing.title,
@@ -761,8 +917,26 @@ export function applyInterpretation(
   const existing = prev.communication_interpretations.find((i) => i.id === id);
   if (!existing) return prev;
   const at = nowIso();
+  const evalEvent = makeEvaluation({
+    organization_id: existing.organization_id,
+    deal_id: existing.deal_id,
+    entity_type: "communication_interpretation",
+    entity_id: id,
+    financial_context: existing.title,
+    initial_system_output: existing.summary,
+    analyst_action: decision === "approved" ? "accepted" : "rejected",
+    final_resolution: existing.impact_summary,
+    preparer_user_id: actorId(),
+  });
+  const change = makeChangeEvent(
+    existing.organization_id,
+    existing.deal_id,
+    `interpretation.${decision}`,
+    { entity_id: id }
+  );
   let next: Database = {
     ...prev,
+    ...appendPhase3Events(prev, evalEvent, change),
     communication_interpretations: prev.communication_interpretations.map((i) =>
       i.id === id ? { ...i, review_status: decision } : i
     ),
@@ -775,7 +949,7 @@ export function applyInterpretation(
         entity_id: id,
         decision,
         rationale: existing.impact_summary,
-        actor_user_id: CURRENT_USER_ID,
+        actor_user_id: actorId(),
         occurred_at: at,
         accepted_financials_changed: false,
       },
@@ -828,7 +1002,7 @@ export function applyInterpretation(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "interpretation_review",
       title:
         decision === "approved"
@@ -842,7 +1016,7 @@ export function applyInterpretation(
       id: newId("aud"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       entity_type: "communication_interpretation",
       entity_id: id,
       action: decision,
@@ -880,7 +1054,7 @@ export function applyValuationPatch(
       id: newId("act"),
       organization_id: existing.organization_id,
       deal_id: existing.deal_id,
-      actor_user_id: CURRENT_USER_ID,
+      actor_user_id: actorId(),
       kind: "valuation_edit",
       title: `Edited ${existing.name} scenario`,
       body: "Scenario analysis only. Accepted financial facts were not mutated.",
@@ -898,4 +1072,392 @@ export function applyMarkReviewed(prev: Database, dealId: string): Database {
       d.id === dealId ? { ...d, last_reviewed_at: at, last_activity_at: at } : d
     ),
   };
+}
+
+export function applyAssign(
+  prev: Database,
+  entityType: string,
+  entityId: string,
+  userId: string
+): Database {
+  const at = nowIso();
+  const actor = actorId();
+  if (entityType === "extracted_fact") {
+    const existing = prev.extracted_facts.find((f) => f.id === entityId);
+    if (!existing) return prev;
+    return touchDeal(
+      {
+        ...prev,
+        extracted_facts: prev.extracted_facts.map((f) =>
+          f.id === entityId
+            ? { ...f, assigned_user_id: userId, assigned_by_user_id: actor }
+            : f
+        ),
+      },
+      existing.deal_id,
+      at,
+      {
+        id: newId("act"),
+        organization_id: existing.organization_id,
+        deal_id: existing.deal_id,
+        actor_user_id: actor,
+        kind: "assignment",
+        title: `Assigned extraction: ${existing.label}`,
+        body: `Assigned to ${userId}.`,
+        occurred_at: at,
+        metadata: { entity_type: entityType, entity_id: entityId, user_id: userId },
+      }
+    );
+  }
+  if (entityType === "conflict") {
+    const existing = prev.conflicts.find((c) => c.id === entityId);
+    if (!existing) return prev;
+    return touchDeal(
+      {
+        ...prev,
+        conflicts: prev.conflicts.map((c) =>
+          c.id === entityId ? { ...c, owner_user_id: userId, assigned_by_user_id: actor } : c
+        ),
+      },
+      existing.deal_id,
+      at,
+      {
+        id: newId("act"),
+        organization_id: existing.organization_id,
+        deal_id: existing.deal_id,
+        actor_user_id: actor,
+        kind: "assignment",
+        title: "Assigned conflict",
+        body: existing.description,
+        occurred_at: at,
+        metadata: { entity_type: entityType, entity_id: entityId, user_id: userId },
+      }
+    );
+  }
+  if (entityType === "missing_item") {
+    const existing = prev.missing_items.find((m) => m.id === entityId);
+    if (!existing) return prev;
+    return touchDeal(
+      {
+        ...prev,
+        missing_items: prev.missing_items.map((m) =>
+          m.id === entityId ? { ...m, assigned_user_id: userId, assigned_by_user_id: actor } : m
+        ),
+      },
+      existing.deal_id,
+      at,
+      {
+        id: newId("act"),
+        organization_id: existing.organization_id,
+        deal_id: existing.deal_id,
+        actor_user_id: actor,
+        kind: "assignment",
+        title: `Assigned missing item: ${existing.title}`,
+        body: existing.why_it_matters,
+        occurred_at: at,
+        metadata: { entity_type: entityType, entity_id: entityId, user_id: userId },
+      }
+    );
+  }
+  return prev;
+}
+
+export function applySupervisorApprove(prev: Database, evaluationId: string): Database {
+  const existing = prev.evaluation_events.find((e) => e.id === evaluationId);
+  if (!existing) return prev;
+  const at = nowIso();
+  const actor = actorId();
+  const change = makeChangeEvent(existing.organization_id, existing.deal_id, "evaluation.approved", {
+    evaluation_id: evaluationId,
+    entity_type: existing.entity_type,
+    entity_id: existing.entity_id,
+    reviewer_user_id: actor,
+    preparer_user_id: existing.preparer_user_id,
+  });
+  let next: Database = {
+    ...prev,
+    ...appendPhase3Events(prev, null, change),
+    evaluation_events: prev.evaluation_events.map((e) =>
+      e.id === evaluationId ? { ...e, reviewer_user_id: actor } : e
+    ),
+  };
+  if (existing.entity_type === "extracted_fact") {
+    next = {
+      ...next,
+      extracted_facts: next.extracted_facts.map((f) =>
+        f.id === existing.entity_id ? { ...f, reviewer_user_id: actor } : f
+      ),
+    };
+  }
+  if (existing.entity_type === "conflict") {
+    next = {
+      ...next,
+      conflicts: next.conflicts.map((c) =>
+        c.id === existing.entity_id ? { ...c, reviewer_user_id: actor } : c
+      ),
+    };
+  }
+  if (existing.entity_type === "recommendation") {
+    next = {
+      ...next,
+      recommendations: next.recommendations.map((r) =>
+        r.id === existing.entity_id ? { ...r, reviewer_user_id: actor } : r
+      ),
+    };
+  }
+  return touchDeal(
+    next,
+    existing.deal_id,
+    at,
+    {
+      id: newId("act"),
+      organization_id: existing.organization_id,
+      deal_id: existing.deal_id,
+      actor_user_id: actor,
+      kind: "evaluation_logged",
+      title: "Supervisor approved without redoing the work",
+      body: `${existing.financial_context ?? existing.entity_type}: ${existing.final_resolution}`,
+      occurred_at: at,
+      metadata: { evaluation_id: evaluationId },
+    }
+  );
+}
+
+export function applyRecommendationReview(
+  prev: Database,
+  id: string,
+  status: RecommendationReview,
+  evaluation?: EvaluationInput
+): Database {
+  const existing = prev.recommendations.find((r) => r.id === id);
+  if (!existing) return prev;
+  const at = nowIso();
+  const actor = actorId();
+  const action: EvaluationAction = status === "rejected" ? "rejected" : status === "accepted" ? "accepted" : "edited";
+  const evalEvent = makeEvaluation({
+    organization_id: existing.organization_id,
+    deal_id: existing.deal_id,
+    entity_type: "recommendation",
+    entity_id: id,
+    financial_context: existing.title,
+    initial_system_output: existing.body,
+    analyst_action: action,
+    corrected_answer: evaluation?.corrected_answer ?? null,
+    why_original_was_wrong: evaluation?.why_original_was_wrong ?? null,
+    controlling_source: evaluation?.controlling_source ?? null,
+    final_resolution: `Recommendation ${status}.`,
+    preparer_user_id: actor,
+  });
+  const change = makeChangeEvent(existing.organization_id, existing.deal_id, `recommendation.${status}`, {
+    entity_id: id,
+  });
+  return touchDeal(
+    {
+      ...prev,
+      ...appendPhase3Events(prev, evalEvent, change),
+      recommendations: prev.recommendations.map((r) =>
+        r.id === id
+          ? { ...r, review_status: status, prepared_by_user_id: actor }
+          : r
+      ),
+    },
+    existing.deal_id,
+    at,
+    {
+      id: newId("act"),
+      organization_id: existing.organization_id,
+      deal_id: existing.deal_id,
+      actor_user_id: actor,
+      kind: "evaluation_logged",
+      title: `${status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : "Edited"} recommendation`,
+      body: existing.title,
+      occurred_at: at,
+      metadata: { recommendation_id: id, status },
+    }
+  );
+}
+
+export function applyBaselinePatch(
+  prev: Database,
+  dealId: string,
+  patch: Partial<PostCloseBaseline>
+): Database {
+  const deal = prev.deals.find((d) => d.id === dealId);
+  if (!deal) return prev;
+  const at = nowIso();
+  const actor = actorId();
+  const existing = prev.post_close_baselines.find((b) => b.deal_id === dealId);
+  const nextRow: PostCloseBaseline = {
+    id: existing?.id ?? newId("base"),
+    organization_id: deal.organization_id,
+    deal_id: dealId,
+    underwritten_revenue: patch.underwritten_revenue ?? existing?.underwritten_revenue ?? null,
+    underwritten_ebitda: patch.underwritten_ebitda ?? existing?.underwritten_ebitda ?? null,
+    accepted_adjustments_total:
+      patch.accepted_adjustments_total ?? existing?.accepted_adjustments_total ?? null,
+    expected_synergies: patch.expected_synergies ?? existing?.expected_synergies ?? null,
+    retention_assumptions: patch.retention_assumptions ?? existing?.retention_assumptions ?? "",
+    nwc_assumption: patch.nwc_assumption ?? existing?.nwc_assumption ?? null,
+    purchase_price: patch.purchase_price ?? existing?.purchase_price ?? null,
+    structure: patch.structure ?? existing?.structure ?? "",
+    expected_first_year_performance:
+      patch.expected_first_year_performance ?? existing?.expected_first_year_performance ?? "",
+    set_by_user_id: actor,
+    set_at: at,
+    notes: patch.notes ?? existing?.notes ?? "",
+  };
+  const change = makeChangeEvent(deal.organization_id, dealId, "baseline.updated", {
+    baseline_id: nextRow.id,
+  });
+  return touchDeal(
+    {
+      ...prev,
+      ...appendPhase3Events(prev, null, change),
+      post_close_baselines: existing
+        ? prev.post_close_baselines.map((b) => (b.deal_id === dealId ? nextRow : b))
+        : [nextRow, ...prev.post_close_baselines],
+    },
+    dealId,
+    at,
+    {
+      id: newId("act"),
+      organization_id: deal.organization_id,
+      deal_id: dealId,
+      actor_user_id: actor,
+      kind: "baseline_edit",
+      title: "Updated post-close baseline",
+      body: "Human-edited underwriting assumptions. Actuals will be compared later.",
+      occurred_at: at,
+      metadata: { baseline_id: nextRow.id },
+    }
+  );
+}
+
+export function applyAdjustmentStatus(
+  prev: Database,
+  id: string,
+  status: AdjustmentStatus,
+  notes?: string,
+  evaluation?: EvaluationInput
+): Database {
+  const existing = prev.ebitda_adjustments.find((a) => a.id === id);
+  if (!existing) return prev;
+  const at = nowIso();
+  const actor = actorId();
+  const evalEvent =
+    status === "accepted" || status === "rejected"
+      ? makeEvaluation({
+          organization_id: existing.organization_id,
+          deal_id: existing.deal_id,
+          entity_type: "ebitda_adjustment",
+          entity_id: id,
+          financial_context: existing.description,
+          initial_system_output: `${existing.description} ${existing.amount} (${existing.status})`,
+          analyst_action: status === "accepted" ? "accepted" : "rejected",
+          why_original_was_wrong: evaluation?.why_original_was_wrong ?? null,
+          controlling_source: evaluation?.controlling_source ?? existing.source,
+          final_resolution: `${status}. Normalized only includes accepted non-synergy items.`,
+          preparer_user_id: actor,
+        })
+      : null;
+  const change = makeChangeEvent(existing.organization_id, existing.deal_id, `adjustment.${status}`, {
+    entity_id: id,
+    from: existing.status,
+    to: status,
+  });
+  return {
+    ...prev,
+    ...appendPhase3Events(prev, evalEvent, change),
+    ebitda_adjustments: prev.ebitda_adjustments.map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            status,
+            user_notes: notes ?? a.user_notes,
+            provenance: {
+              ...a.provenance,
+              approval_status:
+                status === "accepted"
+                  ? "approved_assumption"
+                  : a.origin === "ai"
+                    ? "ai_inference"
+                    : a.provenance.approval_status,
+            },
+          }
+        : a
+    ),
+    deals: prev.deals.map((d) =>
+      d.id === existing.deal_id ? { ...d, last_activity_at: at } : d
+    ),
+    activities: [
+      {
+        id: newId("act"),
+        organization_id: existing.organization_id,
+        deal_id: existing.deal_id,
+        actor_user_id: actor,
+        kind: "adjustment_status",
+        title: `${status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : status === "needs_review" ? "Flagged for review" : "Reopened"} ${existing.description}`,
+        body: `${existing.description} is now ${status}. Amount ${existing.amount}.`,
+        occurred_at: at,
+        metadata: { adjustment_id: id, status },
+      },
+      ...prev.activities,
+    ],
+    audit_events: [
+      {
+        id: newId("aud"),
+        organization_id: existing.organization_id,
+        deal_id: existing.deal_id,
+        actor_user_id: actor,
+        entity_type: "ebitda_adjustment",
+        entity_id: id,
+        action: "status_change",
+        before: { status: existing.status },
+        after: { status },
+        occurred_at: at,
+      },
+      ...prev.audit_events,
+    ],
+  };
+}
+
+export function applySwitchUser(prev: Database, fromUserId: string, toUserId: string): Database {
+  const at = nowIso();
+  return {
+    ...prev,
+    users: prev.users.map((u) => ({
+      ...u,
+      is_current: u.id === toUserId,
+      last_seen_at: u.id === fromUserId ? at : u.last_seen_at,
+    })),
+  };
+}
+
+export function applyPackageExport(prev: Database, dealId: string, kind: "xlsx" | "pdf" | "json"): Database {
+  const deal = prev.deals.find((d) => d.id === dealId);
+  if (!deal) return prev;
+  const at = nowIso();
+  return touchDeal(
+    {
+      ...prev,
+      ...appendPhase3Events(
+        prev,
+        null,
+        makeChangeEvent(deal.organization_id, dealId, "package.exported", { kind })
+      ),
+    },
+    dealId,
+    at,
+    {
+      id: newId("act"),
+      organization_id: deal.organization_id,
+      deal_id: dealId,
+      actor_user_id: actorId(),
+      kind: "package_export",
+      title: `Exported underwriting package (${kind})`,
+      body: "Generated from the live store. Scenario output is labeled scenario analysis.",
+      occurred_at: at,
+      metadata: { kind },
+    }
+  );
 }

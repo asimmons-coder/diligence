@@ -1,3 +1,4 @@
+import { fileBasename, HALE_MESSY_PATHS } from "./paths";
 import type { DetectedDocumentType, DocumentFolder } from "./types";
 
 export interface Classification {
@@ -29,7 +30,7 @@ export function classifyFilename(
   filename: string,
   entityHint = "Hale & Mercer"
 ): Classification {
-  const name = filename.toLowerCase();
+  const name = fileBasename(filename).toLowerCase();
   const format = fileFormat(filename);
   const period = detectPeriod(name);
   const entity = entityHint;
@@ -164,10 +165,12 @@ export const HALE_MESSY_FILENAMES = [
 ] as const;
 
 export function isHaleMessyFilename(filename: string): boolean {
-  const n = filename.trim().toLowerCase();
+  const n = fileBasename(filename).trim().toLowerCase();
   return HALE_MESSY_FILENAMES.some((known) => known.toLowerCase() === n);
 }
 
 export function haleMessyMatchCount(filenames: string[]): number {
   return filenames.filter(isHaleMessyFilename).length;
 }
+
+export { HALE_MESSY_PATHS };
