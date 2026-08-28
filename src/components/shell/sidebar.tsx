@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GitCompare, LayoutDashboard, Rows3 } from "lucide-react";
+import { ClipboardCheck, GitCompare, Inbox, LayoutDashboard, Plus, Rows3 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { href: "/queue", label: "Queue", icon: Inbox },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pipeline", label: "Pipeline", icon: Rows3 },
   { href: "/compare", label: "Compare", icon: GitCompare },
+  { href: "/evals", label: "Corrections", icon: ClipboardCheck },
 ];
 
 export function Sidebar() {
@@ -23,6 +25,15 @@ export function Sidebar() {
           Diligence
         </div>
         <div className="mt-0.5 text-[11px] text-zinc-500">Deal operating system</div>
+      </div>
+      <div className="px-2 pb-2">
+        <Link
+          href="/deals/new"
+          className="flex items-center justify-center gap-1.5 rounded-md bg-zinc-100 px-2.5 py-1.5 text-[13px] font-medium text-zinc-950 hover:bg-white"
+        >
+          <Plus className="size-3.5" />
+          New deal
+        </Link>
       </div>
       <nav className="flex flex-1 flex-col gap-0.5 px-2">
         {NAV.map((item) => {

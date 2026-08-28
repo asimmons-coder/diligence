@@ -84,6 +84,9 @@ export function PipelineView() {
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b bg-white px-4 py-2.5">
         <h1 className="mr-2 text-[15px] font-semibold">Pipeline</h1>
+        <Link href="/deals/new">
+          <Button size="sm">New deal</Button>
+        </Link>
         <div className="flex rounded-md border">
           <Button
             size="sm"
@@ -236,6 +239,10 @@ function KanbanCard({ view }: { view: DealView }) {
       )}
       <div className="mt-1.5">
         <FlagPills flags={view.deal.flags} />
+      </div>
+      <div className="mt-1 text-[10px] text-zinc-500">
+        {view.readiness.overall.replaceAll("_", " ")}
+        {view.openConflictCount > 0 ? ` · ${view.openConflictCount} conflicts` : ""}
       </div>
     </Link>
   );

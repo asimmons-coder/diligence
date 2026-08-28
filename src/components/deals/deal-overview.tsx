@@ -1,11 +1,15 @@
 "use client";
 
+import Link from "next/link";
+import { OVERALL_READINESS_LABELS } from "@/lib/constants";
 import { formatDate, formatMoneyExact } from "@/lib/format";
 import { useStore } from "@/lib/store";
+import { ClaimChip } from "@/components/shared/claim-chip";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
 export function DealOverview({ dealId }: { dealId: string }) {
-  const { dealView, db, setTaskComplete } = useStore();
+  const { dealView, db, setTaskComplete, markDealReviewed } = useStore();
   const view = dealView(dealId);
   if (!view) return null;
 
@@ -15,6 +19,36 @@ export function DealOverview({ dealId }: { dealId: string }) {
         <section>
           <h2 className="mb-1.5 text-[13px] font-semibold">Deal summary</h2>
           <p className="max-w-3xl text-[13px] leading-relaxed text-zinc-700">{view.deal.summary}</p>
+          {(view.deal.external_system || db.import_events.some((e) => e.deal_id === dealId)) && (
+            <div className="mt-3 rounded-md border bg-white px-3 py-2 text-[12px] text-zinc-600">
+              <div className="font-medium text-zinc-800">Source-system boundary</div>
+              <div>
+                {view.deal.external_system ?? "local"} · {view.deal.external_deal_id ?? "—"}
+                {view.deal.external_deal_url && (
+                  <>
+                    {" · "}
+                    <a href={view.deal.external_deal_url} className="underline">
+                      External record
+                    </a>
+                  </>
+                )}
+              </div>
+              <div className="mt-1 text-[11px] text-zinc-500">
+                Imported {view.deal.external_imported_at?.slice(0, 10) ?? "—"} · updated{" "}
+                {view.deal.external_updated_at?.slice(0, 10) ?? "—"}. Diligence remains
+                authoritative for underwriting. Change events are stored, not sent.
+              </div>
+              <ul className="mt-1 text-[11px]">
+                {db.import_events
+                  .filter((e) => e.deal_id === dealId)
+                  .map((e) => (
+                    <li key={e.id}>
+                      {e.source_system} · {e.event_type}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
         </section>
         <section className="rounded-md border bg-white p-3">
           <div className="mb-1 flex items-center justify-between">
@@ -36,6 +70,64 @@ export function DealOverview({ dealId }: { dealId: string }) {
               <div className="tabular font-medium">{formatMoneyExact(view.proFormaEbitda)}</div>
             </div>
           </div>
+        </section>
+        <section className="rounded-md border bg-white p-3">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold">Since your last review</h2>
+            <Button size="xs" variant="outline" onClick={() => markDealReviewed(dealId)}>
+              Mark reviewed
+            </Button>
+          </div>
+          <p className="mb-2 text-[11px] text-zinc-500">
+            Last review {view.deal.last_reviewed_at ? formatDate(view.deal.last_reviewed_at) : "never"}.
+            Accepted financials change only when a human accepts an adjustment.
+          </p>
+          <ul className="space-y-2">
+            {view.digest.slice(0, 8).map((item) => (
+              <li key={item.id} className="border-l-2 border-zinc-200 pl-2">
+                <div className="flex items-center gap-1.5">
+                  <ClaimChip kind={item.kind} />
+                  {item.requiresAction && (
+                    <span className="text-[10px] font-medium text-amber-800">Needs action</span>
+                  )}
+                </div>
+                <div className="text-[13px]">{item.whatChanged}</div>
+                <div className="text-[12px] text-zinc-600">{item.whyItMatters}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {item.evidenceLabel}
+                  {item.acceptedFinancialsChanged ? " · accepted financials changed" : " · accepted financials unchanged"}
+                  {item.href && (
+                    <>
+                      {" · "}
+                      <Link href={item.href} className="underline">
+                        Open
+                      </Link>
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
+            {view.digest.length === 0 && (
+              <li className="text-[12px] text-muted-foreground">Nothing new since last review.</li>
+            )}
+          </ul>
+        </section>
+        <section className="rounded-md border bg-white p-3">
+          <h2 className="mb-1 text-[13px] font-semibold">
+            Readiness · {OVERALL_READINESS_LABELS[view.readiness.overall]}
+          </h2>
+          <p className="mb-2 text-[12px] text-zinc-600">{view.readiness.summary}</p>
+          <ul className="space-y-1.5 text-[12px]">
+            {view.readiness.dimensions.map((d) => (
+              <li key={d.key}>
+                <span className="font-medium">{d.label}</span>
+                <span className="text-zinc-500"> · {d.status.replaceAll("_", " ")}</span>
+                {d.blockingItems[0] && (
+                  <div className="text-amber-800">{d.blockingItems[0]}</div>
+                )}
+              </li>
+            ))}
+          </ul>
         </section>
         <section>
           <h2 className="mb-1.5 text-[13px] font-semibold">Attention required</h2>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { answerAssistant, type AssistantAnswer } from "@/lib/assistant";
-import { CLAIM_KIND_LABELS } from "@/lib/constants";
+import { CLAIM_KIND_LABELS, VISUAL_CLAIM_LABELS } from "@/lib/constants";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -25,6 +25,22 @@ const EXAMPLES = [
   "What diligence questions should we ask Hale & Mercer?",
   "Summarize everything that's changed on this deal since Monday.",
   "Which targets have the highest revenue concentration risk?",
+  "What have we received for Hale & Mercer?",
+  "Which files appear to be duplicates or superseded?",
+  "Reconstruct revenue and reported EBITDA for the last three years.",
+  "Which values do not reconcile?",
+  "What information is still missing?",
+  "What is preventing us from issuing an LOI?",
+  "Which EBITDA adjustments are least defensible?",
+  "What did the seller say about professional-services expenses?",
+  "Did the latest meeting change our view of occupancy expense?",
+  "What is the evidence behind the owner compensation adjustment?",
+  "Compare conservative, base, and upside valuation cases.",
+  "What assumptions create the valuation gap?",
+  "Which negotiation points have the strongest factual support?",
+  "Draft the next seller diligence request.",
+  "What would the purchase price be at 5.5x accepted normalized EBITDA?",
+  "What structure could bridge the valuation gap without paying for unsupported EBITDA at close?",
 ];
 
 export function AssistantDrawer() {
@@ -126,7 +142,7 @@ export function AssistantDrawer() {
                                     : "text-zinc-600"
                               }
                             >
-                              {CLAIM_KIND_LABELS[c.kind]}
+                              {CLAIM_KIND_LABELS[c.kind] ?? VISUAL_CLAIM_LABELS[c.kind] ?? c.kind}
                             </span>
                             <span className="text-zinc-400"> · </span>
                             <span className="font-medium">{c.label}</span>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { SOURCE_LABELS, STAGE_LABELS } from "@/lib/constants";
+import { OVERALL_READINESS_LABELS, SOURCE_LABELS, STAGE_LABELS } from "@/lib/constants";
 import { formatHeaderMultiple, formatMoneyCompact } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { DEAL_STAGES } from "@/lib/types";
@@ -11,9 +11,15 @@ import { FlagPills } from "@/components/shared/flags";
 
 const TABS = [
   { href: "", label: "Overview" },
+  { href: "/intake", label: "Intake" },
   { href: "/financials", label: "Financials" },
   { href: "/diligence", label: "Diligence" },
   { href: "/documents", label: "Documents" },
+  { href: "/evidence", label: "Evidence" },
+  { href: "/valuation", label: "Valuation" },
+  { href: "/package", label: "Package" },
+  { href: "/baseline", label: "Baseline" },
+  { href: "/corrections", label: "Corrections" },
   { href: "/activity", label: "Activity" },
 ];
 
@@ -74,6 +80,20 @@ export function DealWorkspace({
                 {SOURCE_LABELS[deal.source]} · {deal.source_detail}
               </span>
               <FlagPills flags={deal.flags} />
+              <span>·</span>
+              <span>{OVERALL_READINESS_LABELS[view.readiness.overall]}</span>
+              {view.openConflictCount > 0 && (
+                <>
+                  <span>·</span>
+                  <span>{view.openConflictCount} open conflicts</span>
+                </>
+              )}
+              {view.valuationGap != null && view.valuationGap > 0 && (
+                <>
+                  <span>·</span>
+                  <span>Valuation gap {formatMoneyCompact(view.valuationGap)}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -29,8 +29,14 @@ export function DashboardView() {
             proposed add-backs and synergies stay out until someone accepts them.
           </p>
         </div>
-        <div className="text-right text-[12px] text-muted-foreground">
-          Northline Legal · seed book
+        <div className="text-right">
+          <Link
+            href="/deals/new"
+            className="inline-flex rounded-md bg-zinc-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-zinc-800"
+          >
+            New deal
+          </Link>
+          <div className="mt-2 text-[12px] text-muted-foreground">Northline Legal · seed book</div>
         </div>
       </div>
 
@@ -132,6 +138,7 @@ export function DashboardView() {
                 <th className="px-3 py-2 text-right">Revenue</th>
                 <th className="px-3 py-2 text-right">Norm. EBITDA</th>
                 <th className="px-3 py-2">Next action</th>
+                <th className="px-3 py-2">Readiness</th>
                 <th className="px-3 py-2">Last activity</th>
               </tr>
             </thead>
@@ -162,6 +169,14 @@ export function DashboardView() {
                       {v.nextAction
                         ? `${v.nextAction.title} · ${formatDate(v.nextAction.due_date)}`
                         : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-[12px] text-zinc-600">
+                      {v.readiness.overall.replaceAll("_", " ")}
+                      {v.openConflictCount > 0 && (
+                        <div className="text-[11px] text-amber-800">
+                          {v.openConflictCount} conflicts
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {formatRelative(v.deal.last_activity_at)}
